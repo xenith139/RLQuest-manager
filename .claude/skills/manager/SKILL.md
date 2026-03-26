@@ -28,7 +28,7 @@ Ensure the RLQuest Claude tmux session (instance 1) is running and has an active
 - **"send"** (also **"s"**) — when the user says "send" or "s":
   1. Read the current `manager.md` and extract the recommended prompt from the "Recommended Prompt to Dev" section
   2. Build a **checkpoint expectations list** from the prompt — the specific milestones dev should hit (e.g., "add --smoke-test flag", "implement parallelization", "run smoke test", "measure CPU"). Write this list to `manager.md` under a "## Checkpoint Expectations" section.
-  3. Send the prompt to dev via `tmux_send_claude.sh 1 "<prompt>"`
+  3. Send the prompt to dev via `tmux_send_claude.sh 1 "<prompt>"`. Note: the send script sends text + Enter, but Claude Code may show it as "Pasted text". If a subsequent check shows the prompt sitting unsent at the input, send an additional `Enter` via `tmux_send_claude.sh 1 Enter` to submit it.
   4. Enter the **active monitoring loop** (see below)
   5. When dev finishes (returns to idle prompt or reports completion), do a final full review and provide status summary
 
