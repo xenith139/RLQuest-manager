@@ -89,6 +89,16 @@ cd /home/ubuntu/workspace/RLQuest && ./tmux_send_claude.sh 1 Enter
 
 Wait 3 seconds, then capture the pane output again (as in Step 3) to confirm the conversation has resumed successfully.
 
+## Decision Tree & Optimization
+
+After ensuring dev is running and in a conversation, follow the **decision tree** in `decision_tree.md` to determine the next action based on what dev is doing.
+
+If dev is running a long-running script or task:
+- Consult `long_running_script_guide.md` to evaluate optimization quality
+- Check `verified_scripts.json` to see if this script was previously verified
+- Validate runtime behavior (CPU/GPU/memory) even for verified scripts
+- Decide whether to wait or instruct dev to stop and optimize
+
 ## Summary
 
 1. Check if session 1 exists (PID file + tmux has-session).
@@ -96,4 +106,6 @@ Wait 3 seconds, then capture the pane output again (as in Step 3) to confirm the
 3. Inspect the tmux pane content to determine conversation state.
 4. If fresh/clear, send `/resume` via `tmux_send_claude.sh 1 "/resume"`.
 5. Send `Enter` to select the most recent conversation from the resume picker.
-6. Report final status to the user.
+6. Follow `decision_tree.md` to evaluate what dev is doing.
+7. If long-running script detected, apply `long_running_script_guide.md`.
+8. Report final status to the user.

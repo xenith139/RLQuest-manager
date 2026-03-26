@@ -1,0 +1,4 @@
+{
+  "_description": "Registry of scripts verified as fully optimized by the manager. Before trusting these entries, always validate current runtime behavior (CPU/GPU/memory) matches expectations.",
+  "verified": {}
+}
