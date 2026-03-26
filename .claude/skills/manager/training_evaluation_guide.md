@@ -57,6 +57,13 @@ tail -f train.log | grep "util\|data.*ms\|gpu.*ms"
 | ProgressTracker | `_progress.md` exists | Missing | Require dev to add ProgressTracker |
 | torch.compile | Enabled for transformers | Disabled without justification | Enable for 20-30% speedup |
 | Mixed precision (AMP+FP16) | Always enabled | Disabled | MANDATORY — enable AMP + GradScaler immediately |
+| Per-run directory | `models/run_YYYYMMDD_type/` created per run | Files mixed in one folder | MANDATORY — each run gets its own dir |
+| run_meta.json | Written in run dir with type, config, timestamps | Missing | MANDATORY — write at start, update on completion |
+| Every-epoch checkpoint | `latest_checkpoint.pt` written every epoch in run dir | Only on best val or missing | MANDATORY — add immediately |
+| Checkpoint contents | All 9 required fields present | Missing optimizer/scaler/scheduler state | Fix before full run — broken resume |
+| --resume flag | Finds latest run dir, restores full state | Missing or only restores model weights | MANDATORY — add before full run |
+| --unit-test flag | 1 epoch, 50 batches, <2 min, validates all components | Missing | MANDATORY — fastest validation cycle |
+| Training progression | unit → smoke → full (--resume) | Full run from scratch ignoring smoke weights | MANDATORY — full run must --resume from smoke checkpoint |
 
 ### ChunkLoader Tuning Reference
 
@@ -81,8 +88,17 @@ From V1-V4 implementations, these parameters control GPU feed rate:
 | ProgressTracker | ✓ | ✗ | ✗ | ✗ | Required for all training scripts |
 | --smoke-test flag | ✓ | ✓ | ✓ | ✓ | Required |
 | Gradient clipping | ✓ | ✓ | ✓ | ✓ | Required (max_norm=1.0) |
+| Per-run directory | ✗ | ✗ | ✓ (new) | ✗ | MANDATORY — models/run_YYYYMMDD_type/ |
+| Every-epoch checkpoint | ✗ | ✗ | ✓ (new) | ✗ | MANDATORY — latest_checkpoint.pt in run dir |
+| Full checkpoint contents | ✓ (model+opt+scaler) | partial | ✓ (new, all 9 fields) | ✓ (model+opt) | MANDATORY — all 9 fields |
+| --resume flag | ✓ | ✗ | ✓ (new) | ✓ | MANDATORY — restore full training state |
+| --unit-test flag | ✗ | ✗ | ✓ (new) | ✗ | MANDATORY — <2min component validation |
 
-**Note:** V3 and V4 are missing ProgressTracker and GPU timing instrumentation. The manager should instruct dev to add these before full training runs.
+**Known gaps (remaining):**
+- V1, V3, Trade: no per-run directories (files mixed)
+- V1: saves only on best val (not every epoch)
+- V3: no resume, no per-run dir
+- V4: NOW FIXED — has per-run dirs, every-epoch save, full resume, unit test
 
 ## During Training — What to Monitor
 

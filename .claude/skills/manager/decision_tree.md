@@ -46,6 +46,11 @@ High-level decision tree for the manager when monitoring dev (Claude tmux sessio
                         │               ├── Is ChunkLoader used (not MapDataset)? ──► If NO: fix
                         │               ├── Is AMP + FP16 enabled? ──► MANDATORY, if NO: enable immediately
                         │               ├── Is torch.compile used (transformers)? ──► If NO: enable
+                        │               ├── Does it create per-run directory (run_YYYYMMDD_type/)? ──► If NO: add
+                        │               ├── Does it save latest_checkpoint.pt EVERY epoch in run dir? ──► If NO: add
+                        │               ├── Does checkpoint include optimizer+scaler+scheduler state? ──► If NO: fix
+                        │               ├── Does it support --resume from latest run dir? ──► If NO: add
+                        │               ├── Does it support --unit-test (<2min, 50 batches)? ──► If NO: add
                         │               └── All passed? ──► Allow full training
                         │                       See: training_evaluation_guide.md §Before Training
                         │
@@ -283,3 +288,9 @@ When the manager observes dev NOT following expected standards (from rules, skil
 | Training without AMP/FP16 | AMP + FP16 is mandatory for all training | `rules/training.md` §Mixed Precision, `CLAUDE.md` §Training |
 | Training without torch.compile | torch.compile mandatory for transformers | `rules/training.md` §torch.compile |
 | Training without GPU timing instrumentation | Must log data_ms, gpu_ms, util% | `rules/training.md` §GPU Utilization |
+| Training without per-run directory | Must create models/run_YYYYMMDD_type/ per run | `rules/training.md` §Per-Run Directory |
+| Training without every-epoch checkpoint | Must save latest_checkpoint.pt every epoch in run dir | `rules/training.md` §Checkpointing & Resume |
+| Checkpoint missing optimizer/scaler/scheduler state | All state must be saved for proper resume | `rules/training.md` §Checkpoint Contents |
+| Training without --resume flag | Must support resume from latest run dir | `rules/training.md` §Resume from Checkpoint |
+| Training without --unit-test flag | Must support <2min unit test (1 epoch, 50 batches) | `rules/training.md` §Run Types |
+| Model files from different runs mixed in one folder | Each run must have isolated directory | `rules/training.md` §Per-Run Directory |

@@ -84,6 +84,12 @@ Ensure the RLQuest Claude tmux session (instance 1) is running and has an active
      - Log what was detected, what was sent, and dev's response
      - Update checkpoint expectations status
 
+  5. **Continuous improvement tracking** — during ALL monitoring (manage, send, and any dev interaction), continuously update `/home/ubuntu/workspace/RLQuest-manager/manager_improvements.md` with:
+     - What went well (dev behaviors to reinforce)
+     - Gaps identified (in manager skills, dev skills/rules, or workflows)
+     - Improvement candidates (specific proposed fixes with priority)
+     - Do NOT modify skills/rules directly from this — only log observations. The user will decide which improvements to implement.
+
   **Cost Reduction Techniques:**
   - Prefer lightweight bash commands over full pane captures when possible:
     - `tmux capture-pane -t "$sessionId" -p -S -5` (last 5 lines only) instead of 30+ lines
