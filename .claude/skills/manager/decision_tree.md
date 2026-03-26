@@ -31,13 +31,67 @@ High-level decision tree for the manager when monitoring dev (Claude tmux sessio
                         │
                         ├── ABOUT TO RUN A NEW SCRIPT ──► Verify pre-run validation
                         │       │
-                        │       ├── Was smoke test run? ──► If NO: stop, require smoke test first
-                        │       ├── Was performance measured? ──► If NO: stop, require perf test
-                        │       ├── Were 2-3 optimize cycles done? ──► If NO: stop, require iteration
-                        │       └── All passed? ──► Allow full run
-                        │               See: long_running_script_guide.md §8
+                        │       ├── DATA PIPELINE (prepare_*/process_*):
+                        │       │       ├── Was smoke test run? ──► If NO: stop, require it
+                        │       │       ├── Was CPU multi-core verified? ──► If NO: stop
+                        │       │       ├── Was memory stable? ──► If NO: stop
+                        │       │       └── All passed? ──► Allow full run
+                        │       │               See: long_running_script_guide.md §8
+                        │       │
+                        │       └── TRAINING SCRIPT (train*.py):
+                        │               ├── Was --smoke-test run (3 epochs)? ──► If NO: stop
+                        │               ├── Was GPU util measured (must be >70%)? ──► If NO: stop
+                        │               ├── Was data/gpu timing logged? ──► If NO: add instrumentation
+                        │               ├── Is ProgressTracker implemented? ──► If NO: add it
+                        │               ├── Is ChunkLoader used (not MapDataset)? ──► If NO: fix
+                        │               ├── Is AMP + FP16 enabled? ──► MANDATORY, if NO: enable immediately
+                        │               ├── Is torch.compile used (transformers)? ──► If NO: enable
+                        │               └── All passed? ──► Allow full training
+                        │                       See: training_evaluation_guide.md §Before Training
                         │
-                        └── IN CONVERSATION (responding/thinking) ──► Do not interrupt, report status
+                        ├── IN CONVERSATION (responding/thinking) ──► Do not interrupt, report status
+                        │
+                        └── (ALWAYS) EVALUATE WORK ALIGNMENT ──► Goal tracking
+                                │
+                                ├── IDENTIFY what dev is working on (from pane output)
+                                │       What files edited? What scripts running? Conversation topic?
+                                │
+                                ├── MAP TO PROJECT GOALS (from goal_tracker.md + goals.md)
+                                │       │
+                                │       ├── V4 TOKEN PREP ──► Data pipeline goal
+                                │       ├── V4 TRAINING ──► Backbone training goal
+                                │       │       └── See: training_evaluation_guide.md
+                                │       ├── V4 EVALUATION ──► Model comparison goal
+                                │       │       └── See: training_evaluation_guide.md
+                                │       ├── V3/V2 COMPARISON ──► Benchmarking goal
+                                │       ├── PORTFOLIO MODEL ──► Downstream model goal
+                                │       ├── INFRASTRUCTURE / TOOLING ──► Support goal
+                                │       └── UNKNOWN / OFF-TRACK ──► Investigate, may need redirect
+                                │
+                                ├── EVALUATE GOAL PROGRESS
+                                │       │
+                                │       ├── Training in progress?
+                                │       │       Check loss curves, val metrics, GPU util
+                                │       │       Compare to V3 baseline thresholds
+                                │       │       See: training_evaluation_guide.md
+                                │       │
+                                │       ├── Data pipeline running?
+                                │       │       Check progress through quarters, output quality
+                                │       │       Check status.json completeness
+                                │       │
+                                │       └── Evaluation/testing?
+                                │               Check metrics vs previous versions
+                                │               Compute foresight gap reduction
+                                │
+                                ├── UPDATE goal_tracker.md
+                                │       Update current goal, status, metrics, next goals
+                                │
+                                └── PLAN NEXT GOAL (if dev is idle or current goal complete)
+                                        │
+                                        ├── Current goal complete? ──► Identify next priority
+                                        │       from direction.md and goal_tracker.md
+                                        ├── Current goal stalled? ──► Suggest alternative approach
+                                        └── Current goal failing? ──► Recommend pivot or debugging
 ```
 
 ## Long-Running Script Detection
@@ -226,3 +280,6 @@ When the manager observes dev NOT following expected standards (from rules, skil
 | Dev stores normalized data in chunks | Runtime normalization only | `rules/data-pipeline.md` §6, `rules/training.md` §Normalization |
 | No `status.json` checkpointing | Resumable for scripts >5 min | `rules/data-pipeline.md` §5, `details_data-processing.md` §8 |
 | Silent `try-except` that continues | Fail-fast-loud, explicit errors | `rules/general.md` §Error Handling, `details_fail-fast-loud.md` |
+| Training without AMP/FP16 | AMP + FP16 is mandatory for all training | `rules/training.md` §Mixed Precision, `CLAUDE.md` §Training |
+| Training without torch.compile | torch.compile mandatory for transformers | `rules/training.md` §torch.compile |
+| Training without GPU timing instrumentation | Must log data_ms, gpu_ms, util% | `rules/training.md` §GPU Utilization |

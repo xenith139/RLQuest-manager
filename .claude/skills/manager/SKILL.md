@@ -182,6 +182,30 @@ If dev is running a long-running script or task:
 - Validate runtime behavior (CPU/GPU/memory) even for verified scripts
 - Decide whether to wait or instruct dev to stop and optimize
 
+## Goal Tracking & Work Planning
+
+On **every** "manage" command, after evaluating dev's status, also perform goal tracking:
+
+1. **Identify** what dev is working on from the pane output (files edited, scripts running, conversation topic)
+2. **Map** the work to project goals using `goal_tracker.md` and `goals.md` (project root)
+3. **Evaluate progress** toward current goal:
+   - If training: check loss curves, val metrics, GPU util per `training_evaluation_guide.md`
+   - If data pipeline: check progress, output quality, status.json
+   - If evaluation: check metrics vs V3 baseline and foresight upper bound
+4. **Update `goal_tracker.md`** with current goal status, latest metrics, and next goals
+5. **Plan next goal** if dev is idle or current goal is complete:
+   - Read `direction.md` priorities and `goal_tracker.md` next goals list
+   - Include the recommended next task in `manager.md`
+
+When the "send" command is used, include **goal context** in the prompt to dev — explain not just what to do, but why it matters for the project goals.
+
+### Reference Files
+
+- `goal_tracker.md` — living goal/metric tracker (update on every manage)
+- `training_evaluation_guide.md` — how to evaluate training progress and decide next steps
+- `goals.md` (project root) — high-level project goals
+- `firstrate_learning/direction.md` — detailed improvement priorities and training recipe
+
 ## Summary
 
 1. Check if session 1 exists (PID file + tmux has-session).
@@ -191,4 +215,7 @@ If dev is running a long-running script or task:
 5. Send `Enter` to select the most recent conversation from the resume picker.
 6. Follow `decision_tree.md` to evaluate what dev is doing.
 7. If long-running script detected, apply `long_running_script_guide.md`.
-8. Report final status to the user.
+8. **Evaluate work alignment** — map dev's work to project goals.
+9. **Update `goal_tracker.md`** with current status and metrics.
+10. **Plan next goal** if dev is idle or current goal complete.
+11. Report final status to the user (include goal alignment in `manager.md`).
