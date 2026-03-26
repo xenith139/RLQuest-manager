@@ -29,6 +29,14 @@ High-level decision tree for the manager when monitoring dev (Claude tmux sessio
                         │               │
                         │               └── See: long_running_script_guide.md
                         │
+                        ├── ABOUT TO RUN A NEW SCRIPT ──► Verify pre-run validation
+                        │       │
+                        │       ├── Was smoke test run? ──► If NO: stop, require smoke test first
+                        │       ├── Was performance measured? ──► If NO: stop, require perf test
+                        │       ├── Were 2-3 optimize cycles done? ──► If NO: stop, require iteration
+                        │       └── All passed? ──► Allow full run
+                        │               See: long_running_script_guide.md §8
+                        │
                         └── IN CONVERSATION (responding/thinking) ──► Do not interrupt, report status
 ```
 
@@ -57,6 +65,22 @@ Before investigating a long-running script:
 3. If the runtime behavior matches expectations from the verified entry, let it run.
 4. If behavior deviates (higher memory, lower CPU utilization, slower throughput), re-investigate.
 
+## Pre-Run Validation Expectation
+
+The manager expects dev to follow this cycle BEFORE any full-scale run:
+
+1. **Smoke test** (`--smoke-test`) on 1-2 quarters — must pass
+2. **Performance test** on ~5 quarters — measure CPU, memory, throughput
+3. **Iterate 2-3 times** — optimize → test → measure → optimize
+4. **Full run only** when multi-core active, memory stable, checkpointing verified
+
+If the manager observes dev launching a full run without evidence of this cycle:
+- Check tmux history for smoke test runs
+- Check if `--smoke-test` flag exists in the script
+- If no validation was done, instruct dev to stop and run the cycle first
+
+See: `long_running_script_guide.md` §8 for full details.
+
 ## When to Interrupt Dev
 
 **DO interrupt** if:
@@ -65,7 +89,32 @@ Before investigating a long-running script:
 - No caching/checkpointing (a crash means starting over)
 - Loading full datasets into memory when mmap is possible
 - Using gzip when zstd would be faster
+- Dev launched full run without smoke test / performance validation cycle
 - Python loops over large arrays instead of vectorized numpy
+- Dev skips a checkpoint expectation from the manager's instructions
+- Dev ignores or misinterprets a manager correction
+
+**Intervention severity levels:**
+
+| Severity | Trigger | Action |
+|----------|---------|--------|
+| **Minor** | Wrong order, slightly off approach | Brief nudge via tmux: "Note: please also [step]" |
+| **Major** | Skipped critical step (smoke test, parallelization) | Firm correction: "STOP. You skipped [step]. This is mandatory." |
+| **Critical** | About to overwrite data without backup, full run without validation | Immediate stop: "STOP IMMEDIATELY. Do not proceed." |
+
+After any intervention: wait 10-15s, verify dev acknowledged. If ignored, escalate. If ignored twice, report to user and pause.
+
+## Active Monitoring Integration
+
+During the "send" command monitoring loop, the manager MUST apply this decision tree on **every check**, not just the initial assessment. Specifically:
+
+1. On each monitoring check, evaluate dev's current activity against:
+   - The checkpoint expectations list (from `manager.md`)
+   - The compliance review branch (Unexpected Dev Behavior section below)
+   - The long_running_script_guide.md optimization checklist
+2. If a violation is detected, intervene immediately using the severity levels above
+3. If a config gap is found (rule missing/vague), fix the RLQuest `.claude/` files immediately
+4. Log all interventions to `manager.md`
 
 **DO NOT interrupt** if:
 - Script is in `verified_scripts.json` AND runtime behavior matches

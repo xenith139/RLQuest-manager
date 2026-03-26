@@ -1,5 +1,5 @@
 ---
-name: mgr
+name: m
 description: Ensure RLQuest Claude tmux session 1 is running and has an active conversation
 disable-model-invocation: true
 ---
@@ -11,6 +11,89 @@ Ensure the RLQuest Claude tmux session (instance 1) is running and has an active
 ## Terminology
 
 - **"dev"** refers to the Claude tmux session instance 1. When the user says "dev", they mean this session.
+- **"manage"** (also **"mng"** or **"m"**) — when the user says any of these words (with no other arguments), the manager must:
+  1. Run the full procedure (Steps 1-4) to ensure dev is running
+  2. Capture dev's current state from the tmux pane
+  3. Apply the decision tree (`decision_tree.md`) to analyze dev's situation
+  4. Write/overwrite a file at `/home/ubuntu/workspace/RLQuest-manager/manager.md` containing the manager's analysis and recommended prompt/instructions for dev
+  5. Do NOT send anything to dev — only output to `manager.md`. The user will decide whether to send it.
+
+  The `manager.md` file serves as the manager's review report. It should include:
+  - Timestamp of the review
+  - What was observed in dev's session
+  - Decision tree outcome (what branch was taken)
+  - The recommended prompt/instruction for dev (ready to copy-paste or send)
+  - Any config changes made (if compliance issues were found)
+
+- **"send"** (also **"s"**) — when the user says "send" or "s":
+  1. Read the current `manager.md` and extract the recommended prompt from the "Recommended Prompt to Dev" section
+  2. Build a **checkpoint expectations list** from the prompt — the specific milestones dev should hit (e.g., "add --smoke-test flag", "implement parallelization", "run smoke test", "measure CPU"). Write this list to `manager.md` under a "## Checkpoint Expectations" section.
+  3. Send the prompt to dev via `tmux_send_claude.sh 1 "<prompt>"`
+  4. Enter the **active monitoring loop** (see below)
+  5. When dev finishes (returns to idle prompt or reports completion), do a final full review and provide status summary
+
+  **Active Monitoring Loop (full autonomy — always intervene):**
+
+  The manager monitors dev and **actively intervenes** when deviations are detected. This is not passive observation — the manager is an autonomous supervisor.
+
+  **Phase 1: Initial Verification (first 2-3 checks, every 10-15 seconds)**
+  - Full pane capture (30+ lines) to confirm dev received and started working on the prompt
+  - Verify dev is addressing the instructions in order
+  - If dev ignores the prompt or goes off-track immediately → send correction via `tmux_send_claude.sh`
+  - Apply the **Unexpected Dev Behavior** branch from `decision_tree.md` on every check
+
+  **Phase 2: Confident Monitoring (dev is on track)**
+  - Scale back check frequency based on estimated task duration:
+    - Tasks <5 min: check every 30-60 seconds
+    - Tasks 5-30 min: check every 2-5 minutes
+    - Tasks 30+ min: check every 5-10 minutes
+  - Use lightweight checks (5-line tail, `ps aux`) for routine checks
+  - Do full pane capture when checking off a milestone from the expectations list
+  - **On every check, evaluate against checkpoint expectations:**
+    - Is dev progressing through the expected milestones?
+    - Has dev skipped a milestone? → Intervene immediately
+    - Is dev doing something unexpected? → Full pane capture, apply decision tree, intervene if needed
+
+  **Phase 3: Near Completion**
+  - Increase frequency to catch the finish
+  - Full pane capture to review final results
+  - Verify all checkpoint expectations were met
+  - If dev declares "done" but milestones are missing → send correction
+
+  **Intervention Protocol:**
+
+  When the manager detects a deviation during monitoring:
+
+  1. **Assess severity:**
+     - **Minor** (wrong order, slightly off approach): send a brief nudge via `tmux_send_claude.sh 1 "Note: please also [missing step]. This is required per project standards."`
+     - **Major** (skipped critical step like smoke test, no parallelization): send a firm correction via `tmux_send_claude.sh 1 "STOP. You skipped [step]. This is mandatory. Please [specific action] before continuing."`
+     - **Critical** (about to overwrite data without backup, about to run full dataset without validation): send immediate stop via `tmux_send_claude.sh 1 "STOP IMMEDIATELY. Do not proceed. [reason]. You must [required action] first."`
+
+  2. **After intervening:**
+     - Wait 10-15 seconds, then check if dev acknowledged and adjusted
+     - If dev ignores the intervention, escalate: send again with more detail
+     - If dev ignores twice, report to user and pause monitoring
+
+  3. **Apply decision tree compliance review** (from `decision_tree.md` "Unexpected Dev Behavior" section):
+     - Identify the violation
+     - Diagnose root cause (rule missing? rule vague? dev context issue?)
+     - If config gap found: fix the RLQuest `.claude/` config files immediately
+     - Send correction to dev
+
+  4. **Update `manager.md`** after any intervention:
+     - Log what was detected, what was sent, and dev's response
+     - Update checkpoint expectations status
+
+  **Cost Reduction Techniques:**
+  - Prefer lightweight bash commands over full pane captures when possible:
+    - `tmux capture-pane -t "$sessionId" -p -S -5` (last 5 lines only) instead of 30+ lines
+    - Check process status: `ps aux | grep "script_name"` to see if a script is still running
+  - Only do full pane captures (30+ lines) when:
+    - Initial assessment (Phase 1)
+    - Checking off a milestone from expectations list
+    - Something looks wrong (unexpected process state)
+    - Checking results after task completion
+  - For intermediate checks, a 5-line tail of the pane is usually sufficient to confirm dev is still working
 
 ## Paths
 

@@ -153,6 +153,92 @@ Note: The current RLQuest prepare scripts use CPU-only for data prep, deferring 
 
 ---
 
+## 8. Pre-Run Validation: Smoke Test & Performance Test Cycle
+
+**No long-running script may be run at full scale without first passing a smoke test and performance validation cycle.**
+
+### Required Cycle (repeat until all checks pass)
+
+```
+[Implement/Optimize Script]
+        │
+        ▼
+[Run Smoke Test] — reduced dataset (1-2 quarters, subset of symbols)
+        │
+        ├── FAILS → Fix bugs, return to top
+        │
+        └── PASSES → Measure performance
+                │
+                ▼
+[Performance Test] — measure CPU, GPU, memory, throughput
+        │
+        ├── Single-core when multi-core available → Optimize parallelization, return to top
+        ├── Memory growing unbounded → Fix leaks, add cleanup, return to top
+        ├── Throughput below expected rate → Profile and optimize, return to top
+        ├── No checkpointing → Add status.json resume, return to top
+        │
+        └── ALL METRICS PASS → Ready for full run
+                │
+                ▼
+[Full Run]
+```
+
+### Smoke Test Requirements
+
+- Use `--smoke-test` CLI flag (or equivalent) to run on a reduced dataset
+- Typical: 1-2 quarters, ~100 symbols, or first 1000 samples
+- Must complete in under 2 minutes
+- Validates: correct output format, no crashes, files written properly
+
+### Performance Test Measurements
+
+After smoke test passes, measure on a slightly larger subset (~5 quarters):
+
+```bash
+# Run the script on reduced data and measure
+time firstrate_learning/.venv/bin/python -u -m module --smoke-test
+
+# While running, check in another terminal:
+# CPU — expect multi-core utilization
+ps aux | grep "script_name" | grep -v grep | awk '{print "CPU%:", $3, "MEM_MB:", $6/1024}'
+top -b -n 1 -p $(pgrep -f "script_name") | tail -1
+
+# Memory — should be stable, not growing unbounded
+watch -n 5 'ps aux | grep "script_name" | grep -v grep | awk "{print \"RSS_MB:\", \$6/1024}"'
+
+# GPU (if applicable)
+nvidia-smi --query-gpu=utilization.gpu,memory.used --format=csv -l 5
+```
+
+### Performance Acceptance Criteria
+
+| Metric | Acceptable | Unacceptable |
+|--------|-----------|--------------|
+| CPU cores used | >50% of available cores active | Single-core on multi-core machine |
+| Memory trend | Stable or slowly growing | Unbounded growth (leak) |
+| Throughput rate | Consistent with parallelization | Orders of magnitude slower than reference scripts |
+| GPU util (if used) | >50% during compute phases | <10% (bottlenecked on CPU/IO) |
+| Checkpoint files | Written after each unit | None — crash = restart |
+
+### Iteration Requirement
+
+Dev MUST cycle through optimize → smoke test → performance test at least **2-3 times** before the full run. Each cycle should show measurable improvement. Only proceed to full run when:
+- All parallelization is active and measured
+- Memory is stable across the smoke test
+- Throughput extrapolates to a reasonable full-run time
+- Checkpointing is verified (kill and resume test)
+
+**Red flags:**
+- Dev runs full script immediately after implementing without any smoke test
+- Dev runs smoke test but doesn't measure CPU/memory/throughput
+- Dev declares "optimized" after one pass without measuring improvement
+- Smoke test passes but performance metrics not checked
+
+**Prompt to dev:**
+> "Before running the full dataset, run a smoke test first: `--smoke-test` with 1-2 quarters. Then measure CPU utilization (should use multiple cores), memory (should be stable), and throughput rate. Cycle through optimize → test → measure at least 2-3 times. Only proceed to full run when all metrics pass."
+
+---
+
 ## Manager Decision: Wait or Stop & Optimize?
 
 After evaluating the script against the checklist above:
