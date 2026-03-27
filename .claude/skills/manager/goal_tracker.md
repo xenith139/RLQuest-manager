@@ -4,11 +4,11 @@ Living document maintained by the manager. Updated during every "manage" command
 
 ## Current Goal
 
-V4 full training — token preparation completed (11.4M samples), next step is to launch V4 transformer training and evaluate against V3 baseline.
+V4 full training — infrastructure complete (per-run dirs, checkpoint/resume, unit test, smoke test all validated). Next step: run smoke test (3 epochs), then --full to continue training and evaluate against V3 baseline.
 
 ## Goal Status
 
-**READY TO START** — V4 token prep complete. Waiting for training launch.
+**INFRASTRUCTURE COMPLETE** — Per-run directories, every-epoch checkpoint, full resume, --unit-test/--smoke-test/--full/--resume all validated. Previous smoke test showed V4 exceeding V3 after just 1 epoch (CR=0.0186 vs V3=0.0147). Ready to re-run smoke test with new infrastructure, then launch full training.
 
 ## Key Metrics — Model Comparison
 
