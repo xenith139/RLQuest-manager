@@ -130,7 +130,7 @@ Is there an implementation task in the candidate actions?
 Apply the **Priority Rules** (in order):
 
 ```
-1. NEVER let GPU sit idle when there's useful work to do.
+1. NEVER let ANY resource sit idle (GPU, CPU, dev) when there's useful work to do.
 2. PREFER actions that generate information early (cheap investigation before expensive execution).
 3. PREFER parallel execution (GPU trains while dev designs/implements).
 4. INVEST in design iteration over training iteration (2hr architecture review > 20hr retraining).
@@ -140,6 +140,43 @@ Apply the **Priority Rules** (in order):
 
 Choose the action (or combination of parallel actions) with highest expected value.
 
+### 3b. VALIDATE (Operational Gate — MANDATORY before ACT)
+
+**CRITICAL: Before writing any recommendation, run it through the operational checks below. The manager must enforce the same rules on its OWN recommendations that it enforces on dev. This step exists because strategic ORIENT can identify the right action but skip the operational prerequisites.**
+
+For EVERY recommended action, check:
+
+```
+DATA PIPELINE (prepare_*, process_*)?
+  □ Smoke test on representative data (include large quarters)?
+  □ CPU multi-core utilization measured?
+  □ Memory stability verified?
+  □ Throughput measured and extrapolated to full run?
+  □ If ANY unchecked → add validation step BEFORE the action in the prompt
+  □ Ref: long_running_script_guide.md §8, rules/data-pipeline.md
+
+TRAINING (train*.py)?
+  □ Unit test passed?
+  □ Smoke test passed, GPU util >70%?
+  □ AMP+FP16, torch.compile enabled?
+  □ Checkpoint/resume verified?
+  □ Design doc in research/ complete?
+  □ If ANY unchecked → add validation step BEFORE the action in the prompt
+  □ Ref: training_evaluation_guide.md, rules/training.md
+
+IMPLEMENTATION (new code)?
+  □ Design doc in research/ with complete specs?
+  □ If NO → investigate and write design FIRST
+  □ Ref: process_framework.md §2f
+
+ALL ACTIONS:
+  □ Does this chain to a follow-up? → Include it: "After X, immediately do Y"
+  □ Never end with "report when ready" without including the next step
+  □ Include success/failure criteria for each action
+```
+
+**If any check fails**: Modify the recommendation to include the missing step. Do NOT skip validation because the action is "high priority." High priority = validate faster, not skip validation.
+
 ### 4. ACT
 
 Write `manager.md` with:
@@ -147,6 +184,7 @@ Write `manager.md` with:
 - Constraint analysis (what's the bottleneck?)
 - Hypothesis (what are we testing?)
 - ETG comparison (why this path?)
+- **Validation checklist** (which operational checks passed/failed, what was added)
 - Recommended action(s) — including parallel tracks if applicable
 - Success/failure criteria
 
@@ -165,7 +203,7 @@ After every cycle:
 
 | # | Rule | Rationale |
 |---|------|-----------|
-| 1 | Never let GPU sit idle | GPU-hours are the scarcest resource. Train something while dev works on the next thing. |
+| 1 | Never let ANY resource sit idle (GPU, CPU, dev) | GPU-hours, CPU-hours, and dev-hours are all scarce. If GPU is training, CPU should be running data prep. If data prep is running, dev should be writing code. Check all three on every cycle. |
 | 2 | Generate information early | Cheap investigation (1-2hr) prevents expensive mistakes (20hr training wrong architecture). |
 | 3 | Parallel execution | GPU + dev are independent resources. Use both simultaneously. |
 | 4 | Design over tuning | Architecture improvements compound. Hyperparameter tuning has diminishing returns. |
@@ -212,3 +250,8 @@ Compare paths:
 | Starting full training without smoke test | Hours wasted if something is broken | Unit test → smoke test → full (always) |
 | Sequential when parallel is possible | Dev waits while GPU trains, or GPU waits while dev codes | Identify parallel tracks on every cycle |
 | Trusting goal_tracker without verifying filesystem | Cached info may be stale — files moved, runs deleted, processes killed | Always `ls`, `ps aux`, `tail` logs before referencing goal_tracker |
+| Prompt that stops at "report when ready" instead of chaining next step | Dev completes task then sits idle for hours while resources waste | Always chain: "After X passes, immediately proceed to Y. Then start Z." Never leave dev idle without the next task. |
+| Send monitoring that ends when dev finishes one task | CPU/dev may sit idle while there's more work to do | After dev completes prompted task, run one more ORIENT cycle: "Is there idle resource + available work? If yes, send the next task immediately." |
+| Only checking GPU idle, not CPU idle | CPU-bound work (token prep) can run parallel to GPU training | Priority Rule #1 applies to ALL scarce resources: GPU, CPU, dev time. Check all three. |
+| Accepting time estimates without validation | "~1-2 hours" was a guess, not measured. V5 processes 5x more data than V4 which took 47min. | Always require performance test on 5+ quarters before accepting ETG estimates. Apply the pre-run validation cycle to ALL scripts, including data prep. Never skip smoke test → perf test → iterate. |
+| Skipping pre-run validation for "already tested" scripts | Unit test passed ≠ performance validated. Unit test ran 3 tiny quarters, not representative. | Unit test validates correctness. Performance test on large quarters validates speed. Both required. |
