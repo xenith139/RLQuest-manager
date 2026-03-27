@@ -33,8 +33,12 @@ High-level decision tree for the manager when monitoring dev (Claude tmux sessio
         │       │       Action: Fix tooling before wasting GPU time
         │       │
         │       └── Knowledge gap?
-        │               Signal: uncertain which path is right
-        │               Action: Investigate, document, analyze BEFORE committing
+        │               Signal: uncertain which path is right, no design doc in research/
+        │               Action: Investigate BEFORE committing:
+        │                 1. Read existing code (model.py, config.py, direction.md, foresight analysis)
+        │                 2. Ask dev to help investigate if needed (architecture review, metrics analysis)
+        │                 3. Write findings + design to research/ folder
+        │                 4. Only recommend implementation after research/ has complete design
         │
         ├── HYPOTHESIS
         │       State: "Doing X will improve [metric] because [reasoning]"

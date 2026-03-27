@@ -16,11 +16,17 @@ Ensure the RLQuest Claude tmux session (instance 1) is running and has an active
   **1. OBSERVE** — Ensure dev is running (Steps 1-4), capture dev's current state from tmux pane.
 
   **2. ORIENT** (strategic — do NOT skip this):
+  - **Verify ground truth** first — do NOT trust cached documents alone:
+    - `ls` model/run dirs, check checkpoint files exist and their contents
+    - `ps aux` for running processes, `nvidia-smi` for GPU state
+    - `tail` latest log files for actual metrics
+    - Only then cross-reference with `goal_tracker.md` — if reality differs, trust reality and update tracker
   - Read `goal_tracker.md` → current state, metrics, hypothesis, constraint
   - Read `goals.md` → target state
   - Compute **gap**: current metrics vs target. Is the gap shrinking?
   - Identify **constraint**: what single factor limits progress most? (architecture / training recipe / data / infrastructure / knowledge gap)
   - Form **hypothesis**: "Doing X will improve [metric] because [reasoning]"
+  - **Design readiness check**: If recommending an implementation task, verify a design doc exists in `research/` with complete specs (token format, architecture, loss, recipe, data format). If missing or incomplete → the constraint is a knowledge gap → investigate and write the design BEFORE telling dev to implement. See `process_framework.md` §2f.
   - Enumerate **all possible actions** (operational, strategic, meta, parallel)
   - Compute **ETG** for top candidate paths (see `process_framework.md`)
   - Apply **priority rules**: (1) never idle GPU, (2) information early, (3) parallel execution, (4) design over tuning, (5) address constraint, (6) reversible when uncertain
@@ -233,5 +239,20 @@ When the "send" command is used, include **goal context and constraint reasoning
 - `decision_tree.md` — operational decision tree (used within OBSERVE)
 - `training_evaluation_guide.md` — how to evaluate training progress
 - `long_running_script_guide.md` — script optimization checklist
+- `research/` — manager's own investigation and design documents (read + write)
 - `goals.md` (project root) — high-level project goals
+- `manual_docs/` (project root) — documents from manual user-manager sessions (read only, context)
 - `firstrate_learning/direction.md` — detailed improvement priorities
+
+### Research Folder (`research/`)
+
+The manager writes all architecture investigations, design documents, and analysis here. This is the manager's working space for strategic thinking.
+
+**How it works:**
+- When the constraint is a **knowledge gap** or when a design is needed before implementation, the manager investigates by reading code, documents, and prior results, then writes findings to `research/`.
+- Research docs persist across manage cycles — the manager reads them on subsequent runs and iterates.
+- When a design is ready (complete specs), the manager references it in the prompt to dev.
+- The manager may also ask dev to help investigate via tmux (e.g., "analyze the V4 model architecture and report what temporal features are missing").
+
+**Current contents:**
+- `research/v5_design.md` — V5 Temporal Options Surface Transformer design (seeded from manual session, manager continues iterating)

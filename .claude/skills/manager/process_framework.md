@@ -14,10 +14,24 @@ Check dev session state. Capture what dev is doing. This is the existing Steps 1
 
 Before deciding what to do, synthesize all available context:
 
-#### a. Gap Analysis
+#### a. Ground Truth Verification
 
 ```
-Read goal_tracker.md → current state + latest metrics
+Do NOT trust cached documents alone. Independently verify the actual state:
+  - Check filesystem: ls models/, ls cache/, check run dirs exist
+  - Check running processes: ps aux | grep train/prepare
+  - Check GPU state: nvidia-smi (is GPU idle or busy?)
+  - Check latest log files: tail training/pipeline logs
+  - Check checkpoint files: do they exist? what epoch? what metrics?
+
+Only THEN cross-reference with goal_tracker.md.
+If reality differs from goal_tracker → update goal_tracker, trust reality.
+```
+
+#### b. Gap Analysis
+
+```
+Read goal_tracker.md → current state + latest metrics (verified against reality above)
 Read goals.md → target state
 Compute gap: how far from the goal?
 Is the gap shrinking? At what rate? When will we reach the goal at current pace?
@@ -77,6 +91,39 @@ ETG = T_implement + T_train + T_evaluate + T_iterate × P(iterate) + T_wasted ×
 Pick the path with lowest ETG that reaches the goal.
 Factor in parallel execution: GPU and dev are separate resources.
 ```
+
+### 2f. Design Readiness Check
+
+Before recommending any implementation task, verify a sufficient design exists:
+
+```
+Is there an implementation task in the candidate actions?
+  │
+  ├── YES → Check: does a design document exist in research/?
+  │       │
+  │       ├── NO design doc → Constraint is KNOWLEDGE GAP
+  │       │       Action: Investigate first. Read existing code (model.py, config.py,
+  │       │       direction.md, foresight analysis). Write design to research/.
+  │       │       Do NOT tell dev to implement without a design.
+  │       │
+  │       ├── Design doc exists but INCOMPLETE (missing token spec, architecture,
+  │       │   loss function, training recipe, or data format) → Fill the gaps
+  │       │       Action: Investigate the missing parts, update research/ doc.
+  │       │
+  │       └── Design doc exists and COMPLETE → Ready to implement
+  │               Verify: token spec, architecture, loss, recipe, data format all present.
+  │               Include the research/ doc path in the prompt to dev.
+```
+
+**Research folder**: `.claude/skills/manager/research/`
+- The manager writes all investigations, architecture analyses, and design documents here
+- Seeded with existing designs (e.g., `v5_design.md`)
+- The manager reads and iterates on these documents across manage cycles
+- When a design is ready, it's referenced in the prompt to dev
+
+**Manual docs**: `/home/ubuntu/workspace/RLQuest-manager/manual_docs/`
+- Contains documents written during manual user-manager sessions
+- The manager may read these for context but writes its own research to `research/`
 
 ### 3. DECIDE (Rank by Expected Value)
 
@@ -164,3 +211,4 @@ Compare paths:
 | Celebrating early metrics without questioning why | CR=0.0184 in epoch 1 is great — but ask "can it be better?" | Every result is an opportunity to orient: what does this tell us? |
 | Starting full training without smoke test | Hours wasted if something is broken | Unit test → smoke test → full (always) |
 | Sequential when parallel is possible | Dev waits while GPU trains, or GPU waits while dev codes | Identify parallel tracks on every cycle |
+| Trusting goal_tracker without verifying filesystem | Cached info may be stale — files moved, runs deleted, processes killed | Always `ls`, `ps aux`, `tail` logs before referencing goal_tracker |
