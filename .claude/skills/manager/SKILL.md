@@ -18,7 +18,8 @@ Each step runs as its own Agent with only that step's instruction file as its ta
 |---------|-------------|
 | `/m m` or `/m manage` | Spawn subagents for steps 1-5 sequentially. Write to step output files. |
 | `/m s` or `/m send` | Spawn subagent for step 6. Send plan to dev, monitor. |
-| `/m auto` | Continuous loop: steps 1-6 via subagents, loops back to 1 after 6 completes. Runs until pause condition or user interrupt. |
+| `/m auto` or `/m a` | Continuous loop: steps 1-6 via subagents + monitoring sleep. Runs until pause or interrupt. |
+| `/m resume` or `/m r` | Smart resume: detect current state, enter correct mode (monitoring sleep, continue from incomplete step, or start fresh cycle). |
 | `/m stop` | User interrupts the running auto loop. |
 | `/m 1` ... `/m 6` | Run single step as subagent for deep dive. |
 
@@ -155,7 +156,59 @@ If it shows as 'Pasted text', send Enter: /home/ubuntu/workspace/RLQuest/tmux_se
 Monitor dev actively. Intervene on deviations. When dev finishes, write results to /home/ubuntu/workspace/RLQuest-manager/step6_output.md (overwrite) with Persistent Notes, then report back."
 ```
 
-### `/m auto` — Continuous autonomous loop with lightweight monitoring
+### `/m resume` (or `/m r`) — Smart resume from current state
+
+The orchestrator does a quick state assessment DIRECTLY (no subagents) to decide which mode to enter. This is the recommended way to start the manager after a session restart or interruption.
+
+**Resume detection logic** (orchestrator runs these bash commands directly):
+
+```
+Step A: Quick state check (~5 seconds, ~500 tokens)
+  1. ps aux | grep python | grep firstrate_learning → any training/pipeline running?
+  2. nvidia-smi → GPU busy or idle?
+  3. Check dev tmux session → running? idle or busy?
+  4. ls step*_output.md → which step outputs exist? Check timestamps.
+  5. tail -3 latest training log → any active training?
+```
+
+```
+Step B: Decide which mode to enter
+
+  IF training/pipeline process is running AND GPU > 10%:
+    → Enter MONITORING SLEEP directly (no full cycle needed)
+    → Report: "Resuming: training in progress. Entering monitoring sleep."
+    → Then continue with auto loop (wake up when training finishes)
+
+  ELSE IF step5_output.md exists AND has a Recommended Prompt AND step6_output.md is missing or older:
+    → Step 5 completed but Step 6 never ran → run Step 6 (send)
+    → Report: "Resuming: plan exists but was never sent. Running Step 6."
+    → Then continue with auto loop
+
+  ELSE IF some step outputs exist but are incomplete (e.g., step1-3 exist but step4-5 missing):
+    → Determine which step to resume from (first missing step)
+    → Report: "Resuming: steps 1-N complete, continuing from step N+1."
+    → Run remaining steps, then continue with auto loop
+
+  ELSE IF dev is idle AND GPU is idle AND step outputs are stale (>1 hour old):
+    → Start fresh full cycle from Step 1
+    → Report: "Resuming: all idle, starting fresh cycle."
+    → Then continue with auto loop
+
+  ELSE IF dev is busy (coding, not training):
+    → Dev is working on something — check what
+    → If dev is working on a task from the last prompt → enter monitoring (check dev pane periodically)
+    → Report: "Resuming: dev is actively working. Monitoring."
+```
+
+After the initial resume decision, the orchestrator **automatically enters `/m auto` mode** from the appropriate point. Resume always leads to continuous automatic operation — it never stops after a single action. The flow is:
+
+```
+/m resume → quick state detect → enter auto loop at correct point → run indefinitely
+```
+
+Resume is the recommended entry point after any session restart, interruption, or when coming back to the manager after being away. It figures out where things are and picks up the continuous auto loop.
+
+### `/m auto` (or `/m a`) — Continuous autonomous loop with lightweight monitoring
 
 The orchestrator runs an **indefinite loop** with two modes: **full cycle** (subagents) and **monitoring sleep** (bash only, no subagents).
 
