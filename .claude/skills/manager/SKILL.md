@@ -155,22 +155,86 @@ If it shows as 'Pasted text', send Enter: /home/ubuntu/workspace/RLQuest/tmux_se
 Monitor dev actively. Intervene on deviations. When dev finishes, write results to /home/ubuntu/workspace/RLQuest-manager/step6_output.md (overwrite) with Persistent Notes, then report back."
 ```
 
-### `/m auto` — Continuous autonomous loop (no cron needed)
+### `/m auto` — Continuous autonomous loop with lightweight monitoring
 
-The orchestrator runs an **indefinite loop** of steps 1-6. No external timer. The parent stays active, spawning subagents sequentially:
+The orchestrator runs an **indefinite loop** with two modes: **full cycle** (subagents) and **monitoring sleep** (bash only, no subagents).
 
 ```
 LOOP (runs until pause condition hit or user interrupts):
-  1. Spawn Step 1 subagent → wait for completion
-  2. Spawn Step 2 subagent → wait for completion
-  3. Spawn Step 3 subagent → wait for completion
-  4. Spawn Step 4 subagent → wait for completion
-  5. Spawn Step 5 subagent → wait for completion
-  6. Read step5_output.md — check auto-send conditions
-     - If PAUSE: report to user, exit loop
-     - If AUTO-SEND: spawn Step 6 subagent → wait for completion
-  7. After Step 6 returns → loop back to Step 1
+
+  ┌─── FULL CYCLE (steps 1-6 via subagents) ───┐
+  │  1. Spawn Step 1 subagent → wait            │
+  │  2. Spawn Step 2 subagent → wait            │
+  │  3. Spawn Step 3 subagent → wait            │
+  │  4. Spawn Step 4 subagent → wait            │
+  │  5. Spawn Step 5 subagent → wait            │
+  │  6. Check auto-send conditions              │
+  │     - PAUSE → report to user, exit loop     │
+  │     - AUTO-SEND → Spawn Step 6 → wait       │
+  │  7. Step 6 returns with status               │
+  └─────────────────────────────────────────────┘
+           │
+           ▼
+  ┌─── MONITORING SLEEP (bash only, no subagents) ───┐
+  │                                                   │
+  │  If Step 6 reported "long-running task launched"  │
+  │  (training, data prep >30 min):                   │
+  │                                                   │
+  │  MONITORING LOOP (orchestrator does this directly, │
+  │  NO subagents, minimal tokens):                    │
+  │                                                   │
+  │    sleep 300  (5 minutes)                          │
+  │    Quick bash check:                               │
+  │      - ps aux | grep python → process alive?       │
+  │      - tail -3 training.log → loss/epoch progress  │
+  │      - nvidia-smi → GPU still active?              │
+  │                                                   │
+  │    Evaluate:                                       │
+  │      - Process died? → WAKE UP (full cycle)        │
+  │      - Training finished? → WAKE UP (full cycle)   │
+  │      - Metrics available? → WAKE UP (full cycle)   │
+  │      - Error in log? → WAKE UP (full cycle)        │
+  │      - All normal? → sleep again                   │
+  │                                                   │
+  │    Report brief status to user every 3rd check:    │
+  │      "Training epoch N, batch M, loss X, GPU Y%"  │
+  │                                                   │
+  └───────────────────────────────────────────────────┘
+           │
+           ▼ (on WAKE UP)
+  ┌─── FULL CYCLE (back to step 1) ──────────────────┐
+  │  Start new full cycle with fresh subagents.       │
+  │  Steps 1-3 will see training completed/crashed    │
+  │  and plan the next action accordingly.            │
+  └───────────────────────────────────────────────────┘
 ```
+
+**Monitoring sleep details**:
+- The orchestrator does monitoring DIRECTLY using Bash tool calls — no subagents spawned.
+- Each check: ~3 bash commands, ~500 tokens. vs full cycle: 5 subagents, ~120K tokens.
+- Sleep interval: 5 minutes (300 seconds) for training. Adjustable based on task duration.
+- Wake conditions: process exit, training completion (epoch logged), error in log, NaN detected.
+- Status reporting: brief inline message to user every ~15 minutes (every 3rd check).
+
+**How the orchestrator decides which mode**:
+After Step 6 returns, check its return message:
+- Contains "training running" or "launched" or "PID" with ETA > 30 min → enter MONITORING SLEEP
+- Contains "dev completed" or "task done" → loop back to FULL CYCLE immediately
+- Contains "error" or "failed" → loop back to FULL CYCLE immediately
+
+**Monitoring sleep bash template** (orchestrator runs this directly):
+```bash
+# Check 1: Is the training process alive?
+ps aux | grep "firstrate_learning" | grep python | grep -v grep | wc -l
+
+# Check 2: Latest log output (last 3 lines)
+tail -3 /home/ubuntu/workspace/RLQuest/firstrate_learning_v5/output/train_v5_*.log 2>/dev/null
+
+# Check 3: GPU utilization
+nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader 2>/dev/null
+```
+
+If process count = 0 OR log contains "Epoch.*complete" or "Done" or "Error" or "NaN" → break sleep loop, start full cycle.
 
 **Auto-send conditions** (proceed to step 6):
 - Dev is idle and there's a clear next task
@@ -185,9 +249,7 @@ LOOP (runs until pause condition hit or user interrupts):
 - Step 5 flagged LOW confidence
 - Step 6 subagent reports dev encountered unrecoverable error
 
-The loop continues indefinitely: after Step 6 completes (dev finished the task), the orchestrator goes back to Step 1 to assess the new state, plan the next action, and send it. No idle time between cycles.
-
-**Context management**: Each subagent has fresh context. The parent accumulates only the summary return messages (~1-2 paragraphs each). After many cycles, the parent's context may compress, but subagent analysis quality is unaffected.
+**Context management**: Each subagent has fresh context. The parent accumulates only return summaries. During monitoring sleep, the parent uses only bash — near-zero token cost.
 
 ### `/m stop`
 

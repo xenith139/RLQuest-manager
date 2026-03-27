@@ -1,18 +1,18 @@
 # Goal Tracker
 
-Updated by Step 4 (Learn & Update) — 2026-03-27 21:45 UTC
+Updated by Step 4 (Learn & Update) — 2026-03-27 22:10 UTC (Cycle 3)
 
 ## Current Goal
 Validate V5-Small temporal architecture — full training run, evaluate against V3 baseline (CR >= 0.0147).
 
 ## Status
-V5-Small implemented and unit-tested. Token prep COMPLETE (64/64 quarters, 11.4M samples). Unit test passed (CR=0.0015, rank_corr=0.089, return_corr=0.088 after 50 batches). Dev IDLE at prompt ~2+ hours. GPU IDLE at 0%. Full training NOT YET LAUNCHED.
+V5-Small implemented and unit-tested. Token prep COMPLETE (64/64 quarters, 11.4M samples). Unit test passed (CR=0.0015, rank_corr=0.089, return_corr=0.088 after 50 batches). Dev IDLE at prompt ~3+ hours since unit test (18:57 UTC). GPU IDLE at 0%. Full training NOT YET LAUNCHED. Manager has generated launch prompt twice but it has not been delivered to dev.
 
 ## Hypothesis
 "V5-Small's temporal architecture (5-day, d_model=128, 2+1 layers, 680K params) will achieve CR >= 0.0147 because it shows 6x stronger correlation signals than V3's final values after only 50 training batches, indicating superior signal extraction that will convert to captured return with full training."
 
 ## Constraint
-Execution — all prerequisites met (code complete, data complete, unit test passed, GPU idle). The full training run simply needs to be launched. Dev is idle and waiting for instruction.
+Execution — all prerequisites met (code complete, data complete, unit test passed, GPU idle). The full training run simply needs to be launched. Dev is idle and waiting for instruction. This constraint has persisted for 3 consecutive management cycles (~45 min). The bottleneck is prompt delivery to the dev agent, not analysis or planning.
 
 ## Belief State
 
