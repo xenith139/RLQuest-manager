@@ -1,58 +1,80 @@
 # Step 4: Learn & Update
 
-**Purpose**: Reflect on the last executed action and all previous cycles. Did things go as expected? What was missed? Update all tracking documents. Improve the manager process and dev skills if gaps were found.
+**Purpose**: Reflect on previous actions, update goal tracker, log improvement recommendations. Do NOT modify dev or manager instruction files directly.
+
+## Persistence
+
+**FIRST**: Read your own previous output from `/home/ubuntu/workspace/RLQuest-manager/step4_output.md` if it exists. This contains your previous reflections, what was updated, and persistent notes about process gaps and patterns observed across cycles.
+
+**If nothing significant changed since last cycle** (same constraint, same training status, no new results): write brief "No significant changes. Previous learnings still apply." + carry forward persistent notes. This should take <1 minute.
 
 ## Instructions
 
+Read Steps 1-3 from `/home/ubuntu/workspace/RLQuest-manager/step1_output.md`, `step2_output.md`, `step3_output.md`.
+
 ### 4.1 Previous Action Review
-- What was the last action sent to dev? (Read the most recent manager output file if it exists.)
-- Did dev complete it? Check dev pane and filesystem for evidence.
-- Did the action produce the expected result? Compare actual outcome vs stated success criteria.
-- If it failed or produced unexpected results: why? Root cause?
+- What was the last action sent to dev?
+- Did dev complete it? Check evidence from Step 1.
+- Did it produce the expected result? Compare to success criteria from previous step5_output.md.
+- Root cause if it failed or was unexpected.
 
 ### 4.2 Process Retrospective
-- Were there any questions the manager should have asked but didn't in previous cycles?
-- Were there decisions made too quickly without sufficient investigation?
-- Were there resources left idle that could have been working?
-- Were there design issues accepted without deep review?
-- Did the manager follow its own rules? (Smoke test before full run? Design doc before implementation? Performance validation?)
+- Questions the manager should have asked but didn't?
+- Decisions made too quickly?
+- Resources left idle?
+- Design issues accepted without review?
 
 ### 4.3 Update Goal Tracker
-Write/update `goal_tracker.md` in the skills folder with:
-- Current goal and status (verified from Step 1 ground truth)
-- Current hypothesis (from Step 2)
-- Current constraint (from Step 2)
-- Belief state: confidence levels for architecture, recipe, data, next action
-- Latest metrics (from actual training results, not estimates)
-- Next goals priority list
+Update `/home/ubuntu/workspace/RLQuest-manager/goal_tracker.md` with:
+- Current goal, status, hypothesis, constraint, belief state, metrics, priority queue.
+- Only update DATA — do not change the file's structure.
 
 ### 4.4 Update Research Documents
-- If Step 3 found design issues: update the relevant doc in `research/`
-- If new evidence emerged (training metrics, overfitting, performance data): add to research docs
-- If a design decision was validated or invalidated: document it
+- Update relevant docs in `/home/ubuntu/workspace/RLQuest-manager/research/` if new evidence emerged.
 
-### 4.5 Improve Dev Skills & Rules
-Check if dev's behavior in the last action revealed gaps in RLQuest `.claude/` configuration:
-- Did dev follow all rules? (AMP, checkpointing, smoke test, ProgressTracker, etc.)
-- Were there rules that should exist but don't?
-- Were there rules that are too vague and dev interpreted incorrectly?
-- If gaps found: update the specific file in `RLQuest/.claude/rules/` or `RLQuest/CLAUDE.md`
+### 4.5 Log Dev Improvement Recommendations
 
-### 4.6 Improve Manager Process
-- Did the 6-step process work well in this cycle, or did a step miss something?
-- Should any step's questions be expanded or refined?
-- Were there failure modes not covered by the current steps?
+**DO NOT modify any files in `/home/ubuntu/workspace/RLQuest/`.**
+APPEND to `/home/ubuntu/workspace/RLQuest-manager/future_dev_improvements.md` (create if missing):
+```
+### [Date] — [Issue Title]
+- **Found in**: Step [N]
+- **File to change**: [path]
+- **Recommended change**: [specific]
+- **Evidence**: [what revealed this gap]
+```
+
+### 4.6 Log Manager Improvement Recommendations
+
+**DO NOT modify any files in `.claude/skills/manager/`.**
+APPEND to `/home/ubuntu/workspace/RLQuest-manager/future_manager_improvements.md` (create if missing):
+```
+### [Date] — [MANAGER] [Issue Title]
+- **Found in**: Step [N]
+- **Step file to change**: [e.g., step3_design_review.md]
+- **Recommended change**: [specific]
+- **Evidence**: [what was missed]
+```
 
 ## Output Format
 
+Write to `/home/ubuntu/workspace/RLQuest-manager/step4_output.md` (overwrite):
+
 ```
-## Step 4: Learn & Update
+## Step 4: Learn & Update — [date/time]
 
 ### Last action: [description]
 ### Result: [success/partial/failure] — [evidence]
-### Process gaps found: [list or "none"]
+### Process gaps: [list or "none"]
 ### Goal tracker updated: [yes/no, what changed]
-### Research docs updated: [yes/no, what changed]
-### Dev skills updated: [yes/no, what changed]
-### Manager process improvement: [specific change or "none needed"]
+### Research docs updated: [yes/no]
+### Dev improvements logged: [yes/no, count]
+### Manager improvements logged: [yes/no, count]
+
+## Persistent Notes
+- Cycle count: [N] (increment each run)
+- Pattern log: [recurring issues observed across cycles]
+- Process effectiveness: [which steps are working well, which need refinement]
+- Accumulated learnings: [key insights that should inform future cycles]
+- Watch items for next cycle: [specific things Step 4 should check]
 ```

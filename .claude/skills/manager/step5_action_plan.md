@@ -1,83 +1,84 @@
 # Step 5: Action Planning & Validation Gate
 
-**Purpose**: Decide what to do next and verify it's ready to execute. Enumerate all options, pick highest value, validate prerequisites, write the prompt.
+**Purpose**: Decide what to do next, validate it's ready, write the prompt.
+
+## Persistence
+
+**FIRST**: Read your own previous output from `/home/ubuntu/workspace/RLQuest-manager/step5_output.md` if it exists. This contains your previous action plan, validation results, and persistent notes about what actions were taken and what's pending.
+
+**If the previous plan's action is still in progress** (e.g., training still running): confirm "previous action still executing, no new plan needed" + carry forward persistent notes. This should take <1 minute.
+
+**If the previous action completed or the constraint shifted**: plan the next action.
 
 ## Instructions
 
+Read ALL previous steps: `step1_output.md`, `step2_output.md`, `step3_output.md`, `step4_output.md` in `/home/ubuntu/workspace/RLQuest-manager/`.
+
 ### 5.1 Enumerate All Possible Actions
-List EVERY action that could be taken right now. Include:
-- **Operational**: launch training, run data prep, run smoke test, run unit test, fix code
-- **Strategic**: review architecture, redesign model, pivot approach, investigate alternatives
-- **Meta**: update skills, update rules, document findings, improve process
-- **Parallel**: things that can run simultaneously (GPU + CPU + dev)
+List EVERY action: operational, strategic, meta, parallel.
 
 ### 5.2 Resource Check
-For each resource, state:
-- **GPU**: idle or busy? If idle, what could use it?
-- **CPU**: idle or busy? If idle, what could use it?
-- **Dev**: idle or busy? If idle, what could dev work on?
-
-Priority: NEVER leave a resource idle when there's available work for it.
+- GPU: idle or busy? What could use it?
+- CPU: idle or busy? What could use it?
+- Dev: idle or busy? What could dev work on?
+Never leave a resource idle with available work.
 
 ### 5.3 Rank by Expected Value
-For the top 3 candidate actions, evaluate:
-- Expected improvement to the key metric (captured return)
-- Cost (GPU-hours, dev-hours, wall clock time)
-- Risk (probability it fails or wastes time)
-- Information value (does it reduce uncertainty about the right path?)
+Top 3 candidates: expected improvement, cost, risk, information value.
 
 ### 5.4 Validation Gate — MANDATORY
-For EACH recommended action, check ALL that apply:
 
-**Data pipeline (prepare_*, process_*)?**
-- [ ] Smoke test on REPRESENTATIVE data (large quarters, not tiny test)?
-- [ ] CPU multi-core utilization measured?
-- [ ] Memory stability verified?
-- [ ] Throughput measured and extrapolated?
-- If ANY unchecked: add validation step BEFORE the action.
+**Data pipeline?**
+- [ ] Smoke test on representative data?
+- [ ] CPU multi-core verified?
+- [ ] Memory stable?
+- [ ] Throughput measured?
 
-**Training (train*.py)?**
+**Training?**
 - [ ] Unit test passed?
-- [ ] Smoke test with GPU util >70%?
-- [ ] AMP+FP16 enabled?
-- [ ] torch.compile enabled?
-- [ ] Checkpoint/resume working (all 9 fields)?
+- [ ] GPU util >70%?
+- [ ] AMP+FP16?
+- [ ] torch.compile?
+- [ ] Checkpoint/resume (all 9 fields)?
 - [ ] Per-run directory?
-- [ ] Design doc complete in research/?
-- If ANY unchecked: add validation step BEFORE the action.
+- [ ] Design doc complete?
 
-**Implementation (new code)?**
-- [ ] Design doc in research/ with complete specs?
-- If NO: investigate and write design FIRST.
+**Implementation?**
+- [ ] Design doc in `research/` with complete specs?
 
 **ALL actions:**
-- [ ] Chained to follow-up? (After X, immediately do Y.)
+- [ ] Chained to follow-up?
 - [ ] Success criteria defined?
 - [ ] Failure criteria defined?
-- [ ] Never ends with "report when ready" without next step.
+
+If any check fails: add the validation step BEFORE the action in the prompt.
 
 ### 5.5 Write the Plan & Prompt
-Compose the prompt to dev that:
-- Explains WHAT to do and WHY (constraint reasoning)
-- Includes all prerequisite validation steps
-- Chains follow-up tasks
-- Defines success and failure criteria
-- Specifies parallel tracks if applicable
+Include: what to do, why (constraint reasoning), prerequisites, chained follow-ups, success/failure criteria.
 
 ## Output Format
 
-```
-## Step 5: Action Plan
+Write to `/home/ubuntu/workspace/RLQuest-manager/step5_output.md` (overwrite):
 
+```
+## Step 5: Action Plan — [date/time]
+
+### Status: [NEW PLAN / PREVIOUS PLAN STILL EXECUTING / NO ACTION NEEDED]
 ### All possible actions: [numbered list]
 ### Resources: GPU=[idle/busy], CPU=[idle/busy], Dev=[idle/busy]
 ### Chosen action(s): [description with reasoning]
-### Validation gate:
-  - [checklist results, what passed, what was added]
+### Validation gate: [checklist results]
 ### Parallel tracks: [if applicable]
 ### Success criteria: [specific]
 ### Failure criteria: [specific]
 
 ## Recommended Prompt
-[The exact prompt to send to dev, ready to copy-paste or auto-send]
+[Exact prompt to send to dev]
+
+## Persistent Notes
+- Actions taken history: [list of actions sent in previous cycles and their outcomes]
+- Pending items: [things deferred to future cycles]
+- Validation patterns: [which checks tend to fail, what to watch for]
+- Effective prompts: [prompt patterns that worked well with dev]
+- Watch items for next cycle: [what to plan for]
 ```

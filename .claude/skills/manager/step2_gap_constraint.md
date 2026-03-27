@@ -1,60 +1,60 @@
 # Step 2: Gap Analysis & Constraint Identification
 
-**Purpose**: Understand where we are vs where we need to be, and identify the single biggest bottleneck blocking progress.
+**Purpose**: Understand where we are vs where we need to be, and identify the single biggest bottleneck.
+
+## Persistence
+
+**FIRST**: Read your own previous output from `/home/ubuntu/workspace/RLQuest-manager/step2_output.md` if it exists. This contains your previous gap analysis, hypothesis, and constraint identification. Use it as context — confirm or update, don't re-derive from scratch if nothing changed.
 
 ## Instructions
 
-Using the ground truth from Step 1, answer these questions with evidence.
+Read Step 1 findings from `/home/ubuntu/workspace/RLQuest-manager/step1_output.md`.
+Read `/home/ubuntu/workspace/RLQuest-manager/goals.md` for targets.
+
+**If your previous output exists and the constraint hasn't shifted**: quickly confirm "constraint unchanged, hypothesis unchanged, gap [same/narrowing/widening]" and move on. Don't re-do the full analysis.
+
+**If something changed** (new training results, dev completed a task, state shifted): update the analysis.
 
 ### 2.1 Current Performance
-- What is the best model performance achieved so far? (Which version, which epoch, what metrics?)
-- Read the latest training results or logs to get: captured return, P@5%, rank correlation, return correlation, direction accuracy.
-- If no model has been trained yet for the current architecture: state that explicitly.
+- Best model performance? Which version, epoch, metrics?
+- If training is in progress: read latest metrics from log files.
 
 ### 2.2 Target Performance
-- Read `goals.md` — what is the target?
-- What captured return per 10-day period would reach the target annualized return?
-- What does the foresight upper bound look like? (170% in 50 days = ~3.4% per 10-day period)
+- From `goals.md`: what CR per 10-day period is the target?
 
 ### 2.3 Gap
-- Current CR vs target CR — quantify the ratio (e.g., 1.5x, 2x, 5x improvement needed).
-- Is the gap shrinking cycle over cycle? (Compare to previous training results if available.)
-- At the current rate of progress, when would we reach the target? (If unknown, say so.)
+- Current CR vs target CR — ratio.
+- Is gap shrinking? (Compare to previous cycle's gap from persistent notes.)
 
 ### 2.4 Constraint Identification
-Choose ONE primary constraint from:
-- **Architecture**: Model design is the ceiling — no amount of training/tuning will fix it.
-- **Training recipe**: Architecture is fine but hyperparameters, loss weights, lr schedule need work.
-- **Data quality**: Architecture + recipe are fine but data has issues (format, labels, features, noise).
-- **Data quantity**: Need more data or different data splits.
-- **Infrastructure**: Tooling, checkpointing, performance, pipeline issues blocking progress.
-- **Knowledge gap**: We don't know enough to make the right decision — need investigation.
-- **Execution**: Everything is ready, just need to run it.
-
-For the chosen constraint, provide:
-- **Evidence**: What specifically tells you this is the constraint?
-- **Why not the others**: Why is this the bottleneck and not something else?
-- **Has it changed since last cycle?**
+Choose ONE: Architecture / Training recipe / Data quality / Data quantity / Infrastructure / Knowledge gap / Execution.
+- Evidence for chosen constraint.
+- Has it changed since last cycle?
 
 ### 2.5 Hypothesis
-State explicitly:
-- "I believe [action] will improve [metric] from [current] to [target] because [reasoning]."
-- "This can be tested by [experiment]."
-- "Success looks like: [specific criteria]."
-- "Failure looks like: [specific criteria]. If it fails, the next step is [pivot]."
-- "Cost of being wrong: [time/resources wasted]."
+- State: "I believe [action] will improve [metric] because [reasoning]."
+- Success criteria. Failure criteria. Cost of being wrong.
 
 ## Output Format
 
-```
-## Step 2: Gap & Constraint
+Write to `/home/ubuntu/workspace/RLQuest-manager/step2_output.md` (overwrite):
 
-### Best performance: [version] [epoch] CR=[value] P@5%=[value]
-### Target: CR > [value] (~[X]% annualized)
-### Gap: [current] vs [target] = [ratio]x improvement needed
-### Constraint: [category] — [one-sentence description]
-### Evidence: [what proves this is the bottleneck]
-### Hypothesis: "[full statement]"
-### Success criteria: [specific metrics]
-### Failure criteria: [what triggers a pivot]
+```
+## Step 2: Gap & Constraint — [date/time]
+
+### Best performance: [version] [epoch] CR=[value]
+### Target: CR > [value]
+### Gap: [ratio]x improvement needed — [shrinking/stable/growing vs last cycle]
+### Constraint: [category] — [description]
+### Constraint changed from last cycle: [yes/no — what shifted]
+### Hypothesis: "[statement]"
+### Success criteria: [metrics]
+### Failure criteria: [pivot trigger]
+
+## Persistent Notes
+- Previous constraint: [what it was last cycle]
+- Previous gap: [ratio from last cycle]
+- Hypothesis history: [track how hypothesis evolved]
+- Key evidence accumulated: [facts that inform future analysis]
+- Watch items for next cycle: [what to check]
 ```
