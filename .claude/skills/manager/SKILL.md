@@ -11,19 +11,32 @@ Ensure the RLQuest Claude tmux session (instance 1) is running and has an active
 ## Terminology
 
 - **"dev"** refers to the Claude tmux session instance 1. When the user says "dev", they mean this session.
-- **"manage"** (also **"mng"** or **"m"**) — when the user says any of these words (with no other arguments), the manager must:
-  1. Run the full procedure (Steps 1-4) to ensure dev is running
-  2. Capture dev's current state from the tmux pane
-  3. Apply the decision tree (`decision_tree.md`) to analyze dev's situation
-  4. Write/overwrite a file at `/home/ubuntu/workspace/RLQuest-manager/manager.md` containing the manager's analysis and recommended prompt/instructions for dev
-  5. Do NOT send anything to dev — only output to `manager.md`. The user will decide whether to send it.
+- **"manage"** (also **"mng"** or **"m"**) — when the user says any of these words (with no other arguments), the manager runs the **OODA-Constraints Loop** (see `process_framework.md`):
 
-  The `manager.md` file serves as the manager's review report. It should include:
-  - Timestamp of the review
-  - What was observed in dev's session
-  - Decision tree outcome (what branch was taken)
-  - The recommended prompt/instruction for dev (ready to copy-paste or send)
-  - Any config changes made (if compliance issues were found)
+  **1. OBSERVE** — Ensure dev is running (Steps 1-4), capture dev's current state from tmux pane.
+
+  **2. ORIENT** (strategic — do NOT skip this):
+  - Read `goal_tracker.md` → current state, metrics, hypothesis, constraint
+  - Read `goals.md` → target state
+  - Compute **gap**: current metrics vs target. Is the gap shrinking?
+  - Identify **constraint**: what single factor limits progress most? (architecture / training recipe / data / infrastructure / knowledge gap)
+  - Form **hypothesis**: "Doing X will improve [metric] because [reasoning]"
+  - Enumerate **all possible actions** (operational, strategic, meta, parallel)
+  - Compute **ETG** for top candidate paths (see `process_framework.md`)
+  - Apply **priority rules**: (1) never idle GPU, (2) information early, (3) parallel execution, (4) design over tuning, (5) address constraint, (6) reversible when uncertain
+
+  **3. DECIDE** — Choose the action(s) with highest expected value. This may NOT be the next item on the goal tracker list — strategic analysis overrides the task list.
+
+  **4. ACT** — Write `manager.md` with:
+  - Observation summary
+  - **Constraint analysis** (what's the bottleneck?)
+  - **Hypothesis** (what are we testing and why?)
+  - **ETG comparison** if multiple paths exist (why this path is fastest)
+  - Recommended action(s) — including parallel tracks
+  - Success/failure criteria
+  - Do NOT send anything to dev — only output to `manager.md`.
+
+  **5. LEARN** — Update `goal_tracker.md` (metrics, hypothesis, constraint, belief state). Log observations to `management_improvements.md` if process gaps found.
 
 - **"send"** (also **"s"**) — when the user says "send" or "s":
   1. Read the current `manager.md` and extract the recommended prompt from the "Recommended Prompt to Dev" section
@@ -188,40 +201,37 @@ If dev is running a long-running script or task:
 - Validate runtime behavior (CPU/GPU/memory) even for verified scripts
 - Decide whether to wait or instruct dev to stop and optimize
 
-## Goal Tracking & Work Planning
+## Goal Tracking & Strategic Orientation
 
-On **every** "manage" command, after evaluating dev's status, also perform goal tracking:
+Goal tracking is now integrated into the **ORIENT phase** of the OODA-Constraints loop (see above). On every manage command, the ORIENT phase:
 
-1. **Identify** what dev is working on from the pane output (files edited, scripts running, conversation topic)
-2. **Map** the work to project goals using `goal_tracker.md` and `goals.md` (project root)
-3. **Evaluate progress** toward current goal:
-   - If training: check loss curves, val metrics, GPU util per `training_evaluation_guide.md`
-   - If data pipeline: check progress, output quality, status.json
-   - If evaluation: check metrics vs V3 baseline and foresight upper bound
-4. **Update `goal_tracker.md`** with current goal status, latest metrics, and next goals
-5. **Plan next goal** if dev is idle or current goal is complete:
-   - Read `direction.md` priorities and `goal_tracker.md` next goals list
-   - Include the recommended next task in `manager.md`
+1. Reads `goal_tracker.md` for current state, metrics, hypothesis, and constraint
+2. Reads `goals.md` for target state
+3. Computes gap and identifies constraint
+4. Forms hypothesis and enumerates actions
+5. Updates `goal_tracker.md` with new beliefs
 
-When the "send" command is used, include **goal context** in the prompt to dev — explain not just what to do, but why it matters for the project goals.
+When the "send" command is used, include **goal context and constraint reasoning** in the prompt — explain not just what to do, but why it's the highest-leverage action for the goal.
+
+## Summary — OODA-Constraints Loop
+
+1. **OBSERVE**: Check dev session (Steps 1-4). Capture state.
+2. **ORIENT**:
+   a. Read `goal_tracker.md` + `goals.md` → compute gap to target.
+   b. Identify **constraint** (architecture / recipe / data / infra / knowledge).
+   c. Form **hypothesis** — what will improve the key metric and why?
+   d. Enumerate **all possible actions** (operational, strategic, meta, parallel).
+   e. Compute **ETG** for top paths. Apply **priority rules**.
+3. **DECIDE**: Choose highest expected value action(s). Strategic analysis overrides the task list.
+4. **ACT**: Write `manager.md` (constraint, hypothesis, ETG, recommendation, success criteria).
+5. **LEARN**: Update `goal_tracker.md` (metrics, hypothesis, constraint, beliefs). Log to `management_improvements.md`.
 
 ### Reference Files
 
-- `goal_tracker.md` — living goal/metric tracker (update on every manage)
-- `training_evaluation_guide.md` — how to evaluate training progress and decide next steps
+- `process_framework.md` — OODA-Constraints loop, priority rules, ETG formula, anti-patterns
+- `goal_tracker.md` — living goal/metric/hypothesis/constraint tracker
+- `decision_tree.md` — operational decision tree (used within OBSERVE)
+- `training_evaluation_guide.md` — how to evaluate training progress
+- `long_running_script_guide.md` — script optimization checklist
 - `goals.md` (project root) — high-level project goals
-- `firstrate_learning/direction.md` — detailed improvement priorities and training recipe
-
-## Summary
-
-1. Check if session 1 exists (PID file + tmux has-session).
-2. If not running, start it with `tmux_run_claude.sh 1`.
-3. Inspect the tmux pane content to determine conversation state.
-4. If fresh/clear, send `/resume` via `tmux_send_claude.sh 1 "/resume"`.
-5. Send `Enter` to select the most recent conversation from the resume picker.
-6. Follow `decision_tree.md` to evaluate what dev is doing.
-7. If long-running script detected, apply `long_running_script_guide.md`.
-8. **Evaluate work alignment** — map dev's work to project goals.
-9. **Update `goal_tracker.md`** with current status and metrics.
-10. **Plan next goal** if dev is idle or current goal complete.
-11. Report final status to the user (include goal alignment in `manager.md`).
+- `firstrate_learning/direction.md` — detailed improvement priorities

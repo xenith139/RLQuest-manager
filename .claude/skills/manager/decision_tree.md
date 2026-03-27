@@ -2,7 +2,66 @@
 
 High-level decision tree for the manager when monitoring dev (Claude tmux session 1).
 
-## Decision Flow
+**IMPORTANT**: The Strategic Orient (below) runs FIRST on every manage command, BEFORE operational decisions. See `process_framework.md` for the full OODA-Constraints loop.
+
+## 0. Strategic Orient (ALWAYS FIRST)
+
+```
+[Before ANY operational decision, run strategic analysis]
+        │
+        ├── GAP ANALYSIS
+        │       Read goal_tracker.md → current metrics
+        │       Read goals.md → target
+        │       How far from goal? Is gap shrinking?
+        │
+        ├── CONSTRAINT IDENTIFICATION
+        │       │
+        │       ├── Architecture limitation?
+        │       │       Signal: metrics plateau despite good training
+        │       │       Action: Review/redesign architecture BEFORE more training
+        │       │
+        │       ├── Training recipe?
+        │       │       Signal: loss not converging, or wrong solution
+        │       │       Action: Experiment with lr, loss weights, schedule
+        │       │
+        │       ├── Data quality/quantity?
+        │       │       Signal: good architecture + training but poor metrics
+        │       │       Action: Investigate pipeline, labels, features
+        │       │
+        │       ├── Infrastructure?
+        │       │       Signal: slow training, crashes, no checkpointing
+        │       │       Action: Fix tooling before wasting GPU time
+        │       │
+        │       └── Knowledge gap?
+        │               Signal: uncertain which path is right
+        │               Action: Investigate, document, analyze BEFORE committing
+        │
+        ├── HYPOTHESIS
+        │       State: "Doing X will improve [metric] because [reasoning]"
+        │       Define: success criteria, failure criteria, cost of being wrong
+        │
+        ├── PATH COMPARISON (ETG)
+        │       Enumerate all possible paths
+        │       Compute ETG for each: T_implement + T_train + T_eval + T_iterate×P + T_waste×P
+        │       Identify parallel opportunities (GPU + dev simultaneously)
+        │
+        ├── APPLY PRIORITY RULES
+        │       1. Never idle GPU
+        │       2. Information early (cheap investigation before expensive execution)
+        │       3. Parallel execution (GPU trains while dev designs)
+        │       4. Design iteration > training iteration
+        │       5. Address the constraint, not symptoms
+        │       6. Reversible actions when uncertain
+        │
+        └── IS THE CURRENT PLAN STILL THE RIGHT PLAN?
+                │
+                ├── New facts emerged? → Re-evaluate, may need to pivot
+                ├── Gap changed? → Update approach
+                ├── Constraint shifted? → Work on new constraint
+                └── Plan confirmed → Proceed to operational decisions
+```
+
+## 1. Operational Decision Flow
 
 ```
 [Check Dev Session]
