@@ -1,99 +1,159 @@
-## Step 5: Action Plan — 2026-03-27 ~22:30 UTC
+## Step 5: Action Plan — 2026-03-27 ~22:45 UTC
 
-### Status: NEW PLAN (DELIVERY-FOCUSED — previous plans were correct but never delivered)
+### Status: NEW PLAN — Fix OOM crash, add intra-epoch checkpointing, relaunch training
 
 ### All possible actions:
-1. **Launch V5-Small full training (`--full --no-smoke`)** — PRIMARY. All prerequisites met for 3+ hours.
-2. Launch with smoke test (`--full`) — wasteful, 18-24hr smoke test unnecessary after unit test passed.
-3. Re-run unit test with more logging — zero value, unit test already passed.
-4. Fix summary token zero dims — deferred to post-training.
-5. Fix price token dim 15 bug — deferred to post-training.
-6. Fix config.d_ff bug — zero impact currently.
-7. Add feature clipping — deferred to post-training.
-8. Optimize IntraDayEncoder day-loop — deferred to post-training.
-9. Return to V3 — premature without V5 results.
-10. Design V5-Medium — premature without V5-Small baseline.
-11. **SEND THE PROMPT TO DEV VIA TMUX** — THIS is the actual bottleneck. Previous cycles wrote the prompt but never sent it.
+1. **Fix torch.compile OOM** — change mode='reduce-overhead' to mode='default' in train.py line 314 (BLOCKING)
+2. **Add intra-epoch checkpointing** — save checkpoint every 2000 batches during train_epoch (BLOCKING — previous crash lost 2350 batches)
+3. **Drop incomplete trailing batches** — change `< 2` to `< bs` in data_loader.py line 121 (reduces shape diversity)
+4. **Relaunch V5-Small full training** — after all 3 fixes applied (PRIMARY ACTION)
+5. Fix summary token zero dims — deferred to post-training
+6. Fix price token dim 15 bug — deferred to post-training
+7. Fix config.d_ff unused bug — deferred
+8. Optimize IntraDayEncoder day-loop — deferred to post-training
+9. Design V5-Medium — premature without V5-Small results
+10. Clean up zombie processes — cosmetic, low priority
 
-### Resources: GPU=IDLE (0%, 3+ hours), CPU=IDLE (load ~4/20 cores), Dev=IDLE (at prompt 3+ hours)
+### Resources: GPU=IDLE (0%, idle since crash ~22:02 UTC), CPU=IDLE, Dev=IDLE (at prompt)
 
 ### Chosen action(s):
 
-**Action #11 then #1: Actually deliver the training launch prompt to dev via tmux send-keys.**
+**Actions #1, #2, #3, then #4: Apply all 3 fixes, then relaunch full training.**
 
-**Root cause of stagnation:** Steps 1-5 have been producing correct analysis and correct prompts for 3 consecutive cycles, but the prompt in `step5_output.md` was never physically sent to the dev agent's tmux session. The management loop writes to a file; nothing reads that file and sends it. The fix is to use `tmux send-keys` to deliver the prompt directly.
+**Reasoning:** The constraint is Infrastructure (CUDA OOM). All 3 fixes are mandatory before relaunch per orchestrator directive. The previous crash lost 2350 batches (~1.4 hours) because there was no intra-epoch checkpoint. Fix 2 (intra-epoch checkpointing) is non-negotiable — it prevents catastrophic loss of training progress if any future crash occurs during the 6-8 hour epochs.
+
+**Fix details:**
+
+**FIX 1 — torch.compile mode (train.py line 314):**
+- Current: `model = torch.compile(model, mode='reduce-overhead')`
+- Change to: `model = torch.compile(model, mode='default')`
+- Why: `mode='reduce-overhead'` uses CUDA Graphs which recorded 51 distinct shapes, leaking ~17GB. `mode='default'` keeps kernel fusion (10-15% speedup) without CUDA Graphs.
+
+**FIX 2 — Intra-epoch checkpointing (train.py, train_epoch function + training loop):**
+- The `train_epoch` function currently returns only after processing all batches. It has no access to checkpoint-building dependencies (optimizer state, scheduler state, etc.).
+- Approach: Add a checkpoint callback or pass checkpoint dependencies into train_epoch. Every 2000 batches, save `latest_checkpoint.pt` with a `batch_offset` field so resume knows where in the epoch to continue.
+- Minimal approach: Move the training loop inline in the main training function (lines 394-397) rather than calling train_epoch, OR pass a save callback to train_epoch.
+- The checkpoint must include: epoch, batch_offset (n_batches), model_state_dict, optimizer_state_dict, scaler_state_dict, scheduler_state_dict, best_val_score, patience_counter, history, n_params, compiled.
+
+**FIX 3 — Drop trailing batches (data_loader.py line 121):**
+- Current: `if end - start < 2: continue`
+- Change to: `if end - start < bs: continue`
+- Why: Eliminates 46 unique remainder batch sizes, reducing shape diversity for torch.compile.
 
 ### Validation gate:
+
+**Training prerequisites:**
 - [x] Unit test passed (CR=0.0015, rank_corr=0.089, return_corr=0.088)
 - [x] GPU util >70% during unit test (86%)
 - [x] AMP+FP16 enabled
-- [x] torch.compile enabled (reduce-overhead mode)
-- [x] Checkpoint/resume working (all files produced in unit test)
+- [x] torch.compile enabled (will be mode='default' after fix)
+- [MUST VERIFY] Checkpoint/resume working with intra-epoch checkpoint fields
 - [x] Per-run directory (timestamped)
 - [x] Design doc complete
 - [x] Data complete (64/64 quarters, 11.4M samples)
-- [x] Chained to follow-up (monitor epoch 1, compare against baselines)
+
+**Fix-specific validation:**
+- [MUST VERIFY] mode='default' compiles without error
+- [MUST VERIFY] Intra-epoch checkpoint saves at batch 2000 (check file exists before epoch ends)
+- [MUST VERIFY] GPU memory stays flat (not growing) after first ~500 batches
+- [MUST VERIFY] Trailing batch drop works (no batches < 512 in logs)
+
+**All actions:**
+- [x] Chained to follow-up (monitor epoch 1 completion, check val CR against baselines)
 - [x] Success criteria defined
 - [x] Failure criteria defined
 
-**ALL GATES PASS. No blockers.**
-
 ### Parallel tracks:
-| Resource | During Training | After Training |
-|----------|----------------|----------------|
-| GPU | V5-Small full training | Next experiment |
-| CPU | Data loading | Token prep fixes |
-| Dev | Monitor epoch 1 metrics | Evaluate results |
+| Resource | During Fixes | During Training | After Epoch 1 |
+|----------|-------------|----------------|----------------|
+| GPU | Idle (code changes only) | V5-Small full training | Continue training |
+| CPU | Idle | Data loading | Data loading |
+| Dev | Apply 3 fixes | Monitor first 500 batches for OOM, verify checkpoint at batch 2000 | Report val metrics |
 
 ### Success criteria:
-- **Minimum:** Test CR >= 0.0147, return_corr > 0.0132
-- **Strong:** Test CR >= 0.0192, P@5% > 0.33
-- **Exceptional:** Test CR > 0.025
-- **Infrastructure:** GPU util >= 80%, no NaN/crash
+- **Fix validation:** Training runs past batch 2500 without OOM (past the previous crash point)
+- **Checkpoint validation:** `latest_checkpoint.pt` exists and is updated at batch 2000 (before epoch ends)
+- **Memory validation:** GPU memory usage is stable (not growing) between batch 1000 and batch 5000
+- **Training minimum:** Test CR >= 0.0147, return_corr > 0.0132 (match V3)
+- **Training strong:** Test CR >= 0.0192, P@5% > 0.33 (match V1)
 
 ### Failure criteria:
-- **Mild:** CR < 0.0147 but return_corr > 0.02 — tune loss weights
-- **Moderate:** CR < 0.005 and return_corr < 0.01 — check for collapse/overfitting
-- **Severe:** NaN/OOM/crash — debug immediately
-- **Worst case:** CR <= V4 levels (~0.003) — consider V3 revert
+- **OOM recurs with mode='default':** Fall back to disabling torch.compile entirely (`compiled=False`)
+- **Intra-epoch checkpoint corrupt or missing:** Fix checkpoint logic before continuing
+- **Loss diverges or NaN:** Check BCE-with-logits fix still present, check gradient clipping
+- **Training completes but CR < 0.005:** Recipe issue, not infra — investigate loss component weights
 
 ---
 
 ## Recommended Prompt
 
-**DELIVERY METHOD: tmux send-keys to session `claude-1-1774585502`**
-
-The prompt to deliver:
+**IMPORTANT: All 3 fixes MUST be applied BEFORE launching training. The previous crash lost 2350 batches because there was no intra-epoch checkpoint. Do NOT relaunch without intra-epoch checkpointing.**
 
 ```
-Launch V5-Small full training immediately. The unit test passed (CR=0.0015, rank_corr=0.089, return_corr=0.088, 679K params, GPU util 86%). Data is complete (64/64 quarters, 11.4M samples). GPU has been idle 3+ hours.
+The V5-Small full training CRASHED at batch 2350/11325 with CUDA OOM. torch.compile mode='reduce-overhead' leaked ~17GB via CUDA Graphs. No checkpoint survived — training must restart from scratch after applying these 3 mandatory fixes.
 
-Run this command:
+Apply ALL 3 fixes before relaunching:
+
+**FIX 1 — torch.compile mode (train.py line 314):**
+Change: `model = torch.compile(model, mode='reduce-overhead')`
+To:     `model = torch.compile(model, mode='default')`
+Reason: mode='default' keeps kernel fusion without CUDA Graphs. Eliminates the OOM.
+
+**FIX 2 — Intra-epoch checkpointing (train.py, CRITICAL):**
+Add checkpoint saves every 2000 batches during training. The previous crash lost 2350 batches (~1.4 hours) because checkpoints were only saved per-epoch. With 11,325 batches per epoch (6-8 hours), intra-epoch checkpointing is essential.
+
+Implementation: In train_epoch (or by restructuring the training loop), every 2000 batches save a checkpoint to `run_dir / 'latest_checkpoint.pt'` containing all 9 fields: epoch, model_state_dict, optimizer_state_dict, scaler_state_dict, scheduler_state_dict, best_val_score, patience_counter, history, n_params, compiled. Include a `batch_offset` field so training can resume mid-epoch.
+
+The checkpoint resume logic (lines 348-369) should also handle the batch_offset field — when resuming mid-epoch, skip batches up to batch_offset.
+
+**FIX 3 — Drop incomplete trailing batches (data_loader.py line 121):**
+Change: `if end - start < 2:`
+To:     `if end - start < bs:`
+Reason: Eliminates 46 unique remainder batch sizes that contribute to shape diversity.
+
+After applying all 3 fixes, relaunch full training:
+```
 cd /home/ubuntu/workspace/RLQuest && python -m firstrate_learning_v5.train --full --no-smoke
-
-Justification for --no-smoke: unit test validated full pipeline, epoch time is 6-8 hours making smoke test cost 18-24 hours.
-
-After launching, monitor first 100 batches for NaN/Inf. After epoch 1 (~6-8 hours), report: val CR, rank_corr, return_corr, per-component losses, GPU util. Update train_progress.md. Compare final results against V3 (CR=0.0147) and V1 (CR=0.0192).
 ```
 
-## Delivery Confirmation
+**Verification checklist after launch:**
+1. Confirm mode='default' in the training log (no "51 distinct CUDA graph sizes" warning)
+2. Watch GPU memory at batch 500 and batch 1500 — must be stable, not growing
+3. Verify `latest_checkpoint.pt` exists in the run directory at batch 2000 (before epoch ends)
+4. Confirm training passes batch 2350 (the previous crash point) without OOM
+5. After epoch 1 (~7-9h): report val CR, rank_corr, return_corr, per-component losses
+6. Compare against V3 baseline (CR=0.0147) and V1 best (CR=0.0192)
+7. Update train_progress.md with results
+```
 
-**CRITICAL: This prompt MUST be sent via `tmux send-keys` to the dev session. Writing it to this file is NOT sufficient. The orchestrator or this step must execute the tmux command.**
+---
 
 ## Persistent Notes
 - **Actions taken history:**
-  - Cycle 1 (~20:35 UTC): Wrote "launch training" prompt to step5_output.md. NOT DELIVERED to dev.
-  - Cycle 2 (~22:00 UTC): Wrote improved "launch training" prompt to step5_output.md. NOT DELIVERED to dev.
-  - Cycle 3 (~22:30 UTC): THIS CYCLE. Identified delivery as the bottleneck. Prompt MUST be sent via tmux send-keys.
+  - Cycle 1 (~20:35 UTC): Wrote "launch training" prompt. NOT DELIVERED to dev.
+  - Cycle 2 (~22:00 UTC): Wrote improved "launch training" prompt. NOT DELIVERED to dev.
+  - Cycle 3 (~22:30 UTC): Identified delivery bottleneck. Training WAS launched (by dev independently or by tmux delivery).
+  - Cycle 4 (~22:35 UTC): Training crashed at batch 2350. Analyzed OOM root cause. Updated goal tracker. Identified 3 mandatory fixes.
+  - Cycle 5 (~22:45 UTC): THIS CYCLE. Planning fix-and-relaunch. All 3 fixes mandatory before relaunch.
 - **Pending items:**
-  - Fix summary token dims 14-19 (after training)
-  - Fix price token dim 15 (after training)
-  - Optimize IntraDayEncoder day-loop (after training)
+  - Fix summary token dims 14-19 (after training completes)
+  - Fix price token dim 15 (after training completes)
+  - Optimize IntraDayEncoder day-loop (after training completes)
   - Fix config.d_ff unused bug (maintenance)
-- **Validation patterns:** All validation gates have passed for 3 consecutive cycles. The bottleneck is not validation — it is delivery.
-- **Effective prompts:** Unknown — no prompt has been delivered yet. The prompt format is ready but untested.
+  - Clean up 5 zombie processes (cosmetic)
+- **Validation patterns:**
+  - torch.compile mode='reduce-overhead' is dangerous with variable-shape inputs — NEVER use again without fixed input shapes
+  - Per-epoch-only checkpointing is inadequate for 6-8 hour epochs — always add intra-epoch saves
+  - Previous validation gates missed infrastructure resilience (OOM, checkpoint frequency) — now explicitly checking
+- **Effective prompts:**
+  - Detailed fix prompts with exact line numbers and before/after code work well
+  - Verification checklists ensure dev confirms fixes before moving on
+  - Including the "reason" for each fix helps dev understand priority and not skip steps
 - **Watch items for next cycle:**
-  - VERIFY training is actually running (new run dir in models/, GPU util > 0%)
-  - If running: monitor epoch 1 metrics
-  - If NOT running: escalate — the management process cannot deliver prompts and needs human intervention
-- **STAGNATION ALERT:** 3 cycles with identical recommendation, 0 state changes. If this cycle also fails to deliver, the management loop is fundamentally broken for prompt delivery.
+  - Have all 3 fixes been applied? Check train.py for mode='default' and intra-epoch checkpoint logic, data_loader.py for `< bs`
+  - Has training been relaunched? Check for new run dirs in models/
+  - If training running: GPU memory trend MUST stay flat (key OOM-fix confirmation)
+  - If training running: verify intra-epoch checkpoint appears at batch 2000
+  - If training running: loss should start ~0.66 and follow similar trajectory to pre-crash run
+  - BCE-with-logits fix still present?
+  - Epoch wall-clock time with mode='default' (expect ~7-9.5h vs ~6.25h with reduce-overhead)

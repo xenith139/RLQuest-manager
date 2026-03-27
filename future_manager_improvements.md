@@ -19,3 +19,15 @@ Recommendations for changes to manager process files (.claude/skills/manager/ste
 - **Step file to change**: step4_learn_update.md
 - **Recommended change**: Add a stagnation check: if the same constraint persists for 3+ consecutive cycles with no state change, Step 4 should flag this as STAGNATION and recommend escalation (e.g., alert the human operator, attempt direct action delivery, or change approach). Currently, the loop can spin indefinitely generating the same recommendation without progress.
 - **Evidence**: Constraint has been "Execution" for 3 cycles. Status has been "dev idle, GPU idle, launch training" for 3 cycles. No state change between cycles.
+
+### 2026-03-27 — [MANAGER] Step 3 design review should flag missing resilience patterns
+- **Found in**: Step 4, Cycle 4
+- **Step file to change**: step3_design_review.md
+- **Recommended change**: Add a "Resilience Checklist" to Step 3's review template: (1) Does training have intra-epoch checkpointing for epochs > 2 hours? (2) Does the code handle variable input shapes gracefully with torch.compile? (3) Is there a GPU memory monitoring/alerting mechanism? (4) Can training resume from the last checkpoint after any crash? Step 3 should flag missing resilience items as CRITICAL, not just architectural or recipe issues.
+- **Evidence**: The Step 3 design review (Cycles 1-3) reviewed architecture, recipe, data, and loss components thoroughly but did not flag the absence of intra-epoch checkpointing or the CUDA Graph risk from variable shapes. These were infrastructure resilience gaps, not design gaps, but they caused the most impactful failure so far (losing 2350 batches of training).
+
+### 2026-03-27 — [MANAGER] Goal tracker should track infrastructure readiness separately
+- **Found in**: Step 4, Cycle 4
+- **Step file to change**: step4_learn_update.md (goal tracker update instructions)
+- **Recommended change**: Add an "Infrastructure Readiness" section to the goal tracker template that tracks: torch.compile mode, checkpointing strategy (per-epoch vs intra-epoch), GPU memory headroom, known crash risks, and recovery plan. Currently the goal tracker focuses on model/data/recipe readiness but not infrastructure resilience.
+- **Evidence**: The goal tracker said "Full training NOT YET LAUNCHED" and constraint was "Execution" when in reality training had been launched, crashed, and the constraint had shifted to Infrastructure. The tracker had no fields for infrastructure status, so this gap went unrecorded until Step 1 of the next cycle discovered it.
