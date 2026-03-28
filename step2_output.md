@@ -1,67 +1,85 @@
-## Step 2: Gap & Constraint — 2026-03-27 22:20 UTC
+## Step 2: Gap & Constraint — 2026-03-28 00:11 UTC
 
-### Constraint SHIFTED: Execution -> Infrastructure (CUDA OOM crash)
+### Constraint SHIFTED: Infrastructure (OOM) -> Training Recipe (mode collapse / LR overshoot)
 
-Previous cycle's Execution constraint was resolved — training was launched. But it crashed at batch 2350/11325 (20.7% of epoch 1) due to CUDA OOM from torch.compile CUDA Graph memory accumulation. Constraint has shifted from "just launch it" to "fix the memory leak and relaunch."
+OOM fix confirmed working (GPU memory stable at 6.8 GiB). Training completed epoch 1 successfully with strong results (CR=0.0138, near V3 baseline of 0.0147). However, epoch 2 showed catastrophic mode collapse: train loss ROSE (0.5508->0.5894), val loss spiked 15.7%, precision/recall collapsed to 0.000. Epoch 3 continuing same degradation. This is NOT overfitting — it is LR overshooting or multi-task loss conflict destroying the minimum found in epoch 1.
 
-### Best performance: V1 (archive) epoch 33 CR=0.0192
-### V5 partial run (crashed): Loss 0.66 -> 0.27 over 2350 batches. No CR/eval metrics available (crash before epoch completion). Loss trajectory was excellent — steady decline, no instability.
-### Baseline target: V3 epoch 12 CR=0.0147, return_corr=0.0132
-### Target: CR >= 0.0147 with return_corr > 0.0132
-### Gap: Still unmeasurable — no completed epoch means no validation metrics. However, the strong loss trajectory (0.66->0.27 in 20% of epoch 1) is highly encouraging. Model was clearly learning.
-### Gap trend: Directionally positive but formally unchanged — we now have evidence the V5 architecture learns well, but still no CR number to compare against target.
-### Constraint: Infrastructure — CUDA Graph memory leak from torch.compile
-### Constraint changed from last cycle: YES. Was Execution (training not launched), now Infrastructure (training launched but crashes due to OOM). The Execution constraint was resolved — dev launched training. The new blocker is a torch.compile CUDA Graphs issue that recorded 51 distinct input shapes, leaking ~17GB of untracked GPU memory until OOM at 23.58/24GB.
-### Hypothesis: "Disabling CUDA Graphs in torch.compile (via cudagraph_skip_dynamic_graphs=True or compile mode='reduce-overhead' removal) will allow full training to complete, achieving CR >= 0.0147, because the model was learning well (loss 0.27 at crash) and the OOM is purely a memory management issue, not a model or data problem."
-### Success criteria: Training completes all epochs without OOM, GPU memory stays flat (not growing), test CR >= 0.0147
-### Failure criteria: OOM recurs after fix (try next fix option); training completes but CR < 0.005 (recipe issue, not infra)
+### Best performance: V5-Small epoch 1 CR=0.0138, Prec=0.591, Rec=0.881, P@5=0.213
+### Target: CR >= 0.0147 with return_corr > 0.0132 (V3 baseline)
+### Gap: 0.0138 / 0.0147 = 0.94x — only 6% improvement needed. Gap is now MEASURABLE and SMALL.
+### Gap trend: MAJOR IMPROVEMENT. Was unmeasurable (no completed epoch). Now within striking distance of target. Epoch 1 alone nearly matches V3. The problem is not model capability — it is training stability beyond epoch 1.
+### Constraint: Training Recipe — learning rate causes mode collapse after epoch 1
+### Constraint changed from last cycle: YES. Was Infrastructure (CUDA OOM). Now Training Recipe (LR/scheduler). Infrastructure constraint fully resolved.
+### Hypothesis: "Implementing a prove-out mode (20% data, 5 epochs, ~15 min total) will accelerate LR/scheduler iteration by 10x, enabling rapid discovery of a stable training recipe that sustains epoch 1's CR=0.0138 performance across multiple epochs, because the mode collapse signature (rising train loss) would be visible within 2 epochs on reduced data."
+### Success criteria: Prove-out run completes in <20 min, reproduces the mode collapse at current lr=3e-4, and identifies a lr/schedule that shows declining or stable train loss across 5 epochs
+### Failure criteria: Prove-out runs do not reproduce full-data behavior (reduced data has fundamentally different dynamics), wasting time on non-transferable experiments
 
-### Root cause detail:
-- torch.compile with CUDA Graphs records a separate graph for each unique input tensor shape
-- V5 data has variable-length sequences producing 51 distinct shapes over 2350 batches
-- Each graph recording consumes GPU memory that PyTorch doesn't track as "allocated"
-- Result: PyTorch reports 6.22 GiB allocated, but process actually uses 23.58 GiB (17.36 GiB in CUDA Graph private pools)
-- This is a known PyTorch issue with variable-length inputs + torch.compile
+### Detailed Analysis:
 
-### Fix priority (for dev directive):
-1. **Best:** `torch._inductor.config.triton.cudagraph_skip_dynamic_graphs = True` — keeps compile benefits, skips graphs for variable shapes
-2. **Good:** Pad all inputs to fixed sizes to reduce distinct shape count to ~1-3
-3. **Safe fallback:** Disable torch.compile entirely (`compiled=False` in config) — loses ~10-20% throughput but guarantees no graph leak
-4. **Complementary:** `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` — helps fragmentation, use alongside option 1
+**Why prove-out mode makes sense NOW:**
+1. The mode collapse is visible by epoch 2 batch-level metrics (train loss rising within the epoch). With 20% data, each epoch takes ~15 min instead of ~75 min. Five epochs in ~75 min instead of ~6.25 hours.
+2. The key diagnostic (train loss trajectory) does not require the full dataset to be informative. If lr=3e-4 overshoots on full data, it will almost certainly overshoot on 20% data (possibly even faster due to fewer gradient steps per epoch).
+3. Multiple experiments can be run sequentially in a few hours: lr=3e-4, lr=1e-4, lr=5e-5, lr=3e-4 with cosine decay, etc.
+4. Current approach (full data, patience=15) would waste ~17 hours of GPU time on 14 more failing epochs before early stopping triggers.
 
-### Urgency: HIGH
-- GPU is idle (0% util, 53MiB VRAM, 15W)
-- Dev is idle at prompt, appears unaware of crash
-- Fix is straightforward (1-line config change for option 1)
-- Pre-crash training speed was ~75 min/epoch (much faster than estimated 6-8 hours), so full 50-epoch training with patience=15 could complete in a few hours once relaunched
+**Implementation approach (for dev directive):**
+- Add a `--prove-out` flag to train.py that:
+  - Uses 20% of training chunks (28 of 138 chunks, ~2265 batches/epoch)
+  - Runs 5 epochs max (no early stopping patience)
+  - Logs batch-level loss every 50 batches (already done)
+  - Skips full validation (only log train loss trajectory — the diagnostic we need)
+  - OR: faster alternative — just pass `--max-chunks 28 --max-epochs 5` if the data loader supports chunk limiting
+- Alternatively, the simplest implementation: create a small token subset by symlinking only 28 of 138 train chunk files
+
+**Immediate action priority:**
+1. STOP current training (epoch 3+ is wasting GPU time, best model already saved from epoch 1)
+2. Implement prove-out mode OR manually limit data
+3. Run prove-out sweep: test lr in {1e-4, 5e-5, 3e-4 with cosine decay, 3e-4 with warmup+decay}
+4. Whichever lr/schedule shows stable or declining train loss across 5 prove-out epochs, use that for full run
+5. Relaunch full training with winning recipe
+
+**Risk assessment of prove-out approach:**
+- LOW risk: epoch 1 best model is preserved regardless of what we do next
+- The 20% subset may have slightly different batch statistics, but the mode collapse is so dramatic (train loss rising 7% in epoch 2) that any recipe that fixes it on 20% data will very likely fix it on full data
+- Cost of being wrong: ~75 min of GPU time on a prove-out sweep that doesn't transfer. This is still much less than the ~17 hours of wasted patience epochs.
+
+**Alternative to prove-out (also valid):**
+- Just reduce lr to 1e-4 and relaunch full training directly. This is simpler but slower to iterate if 1e-4 also fails.
+- Add cosine annealing scheduler and relaunch. Good odds of working but no fast feedback loop.
 
 ---
 
 ## Persistent Notes
-- Previous constraint: Execution (training not launched) — RESOLVED by launching training
-- Current constraint: Infrastructure (CUDA OOM from torch.compile CUDA Graphs)
-- Previous gap: Unmeasurable (no training run)
-- Current gap: Still unmeasurable (crash before epoch 1 completion), but loss trajectory 0.66->0.27 is strong signal
+- Previous constraint: Infrastructure (CUDA OOM from torch.compile) — RESOLVED by switching to mode='default'
+- Current constraint: Training Recipe (lr=3e-4 causes mode collapse after epoch 1)
+- Previous gap: Unmeasurable (no completed epoch)
+- Current gap: 0.94x of target (CR=0.0138 vs target 0.0147) — NEARLY THERE
 - Hypothesis history:
-  - Cycle 1-3: "Launch full training, expect CR >= 0.0147 based on strong early correlation signals"
-  - Cycle 4 (current): "Fix CUDA Graph OOM and relaunch — model learns well, OOM is purely infra"
+  - Cycle 1-3: "Launch full training, expect CR >= 0.0147" (blocked by execution)
+  - Cycle 4: "Fix CUDA Graph OOM and relaunch" (CONFIRMED — OOM fixed, training ran)
+  - Cycle 5 (current): "Implement prove-out mode for rapid LR/scheduler iteration to fix mode collapse"
 - Key evidence accumulated:
-  - V5 partial training: loss 0.66->0.27 over 2350 batches (20.7% of epoch 1) — excellent learning
-  - V5 GPU util during training: 88-90% (healthy), ~20s per 50 batches
-  - V5 OOM at batch 2350: 51 CUDA Graph shapes, 17.36 GiB untracked memory
-  - BCE fix was applied between run 1 and run 3 (verify it persists)
-  - V5-Small unit test: 679K params, CR=0.0015, rank_corr=0.089, return_corr=0.088 (50 batches)
-  - V3 baseline: 136K params, CR=0.0147, rank_corr=0.0152, return_corr=0.0132 (full training, epoch 12)
-  - V1 best ever: CR=0.0192, rank_corr=0.0197, dir_acc=0.5218 (full training, epoch 33)
-  - V4 was a regression: 4.77M params, CR=0.0031, negative correlations. Overparameterized.
-  - V5 data: 64/64 quarters, 11.4M samples, complete and verified
-  - GPU: Quadro RTX 6000, 24GB, currently IDLE
-  - Known data issues: 6/20 summary token dims are zeros, price token dim 15 always zero
+  - V5 epoch 1: CR=0.0138, Prec=0.591, Rec=0.881, P@5=0.213, TrL=0.5508, VL=0.6111 — STRONG
+  - V5 epoch 2: MODE COLLAPSE. TrL=0.5894 (ROSE), VL=0.7073 (+15.7%), Prec/Rec=0.000
+  - V5 epoch 3: Continuing degradation, TrL rising within epoch (0.585->0.588 at batch 1000)
+  - Mode collapse is NOT overfitting (train loss rises too) — it is LR overshoot or loss conflict
+  - P@5 improved 0.213->0.251 despite collapse — ranking signal preserved, calibration destroyed
+  - LR barely decayed epoch 1->2: 3.00e-4 -> 2.99e-4 (essentially no schedule effect)
+  - Best model (epoch 1) safely preserved in best_model.pt and best_model_epoch1.pt
+  - V5 training speed: ~75 min/epoch on full data. Prove-out (20%) would be ~15 min/epoch.
+  - V5 data: 138 train chunks, 11,325 batches/epoch at batch_size=512
+  - GPU: Quadro RTX 6000, 24GB, memory stable at 6.8 GiB (OOM fix working)
+  - V3 baseline: CR=0.0147, rank_corr=0.0152, return_corr=0.0132 (epoch 12)
+  - V1 best ever: CR=0.0192 (epoch 33)
+  - V4 was a regression: CR=0.0031 (overparameterized)
+  - Known data issues: 6/20 summary token dims zeros, price dim 15 always zero
+  - BCE fix applied and confirmed working
+  - 7 zombie processes (cosmetic)
 - Watch items for next cycle:
-  - Has OOM fix been applied? Check train.py for cudagraph config or compile changes
-  - Has training been relaunched? Check for new run dirs in models/
-  - If training running: monitor GPU memory trend (MUST stay flat, not growing — this is the key OOM indicator)
-  - If training running: verify loss continues from similar starting point (model reinitializes, so loss should start ~0.66 again)
-  - If epoch 1 completes: check val metrics for first real CR/correlation numbers
-  - BCE fix still present in train.py?
-  - 5 zombie processes still lingering (cosmetic but worth cleaning eventually)
+  - Has dev stopped the current (wasteful) training run?
+  - Has prove-out mode been implemented or data subset created?
+  - If prove-out running: what is train loss trajectory across 5 epochs for each lr tested?
+  - Key signal: train loss should DECLINE or stay flat across prove-out epochs. Any rise = recipe still broken.
+  - Once winning recipe identified: full training relaunched with new lr/schedule?
+  - Epoch 1 best model PRESERVED — this is our safety net regardless of experiments
+  - If dev takes alternative approach (just change lr and relaunch full): monitor epoch 2 for same collapse pattern

@@ -37,3 +37,41 @@ Recommendations for changes to dev workspace files. These should be applied by a
 - **File to change**: /home/ubuntu/workspace/RLQuest/.claude/rules/training.md
 - **Recommended change**: Add rule: "For epochs exceeding 2 hours, implement intra-epoch checkpointing every N batches (recommended: every 2000 batches or every 30 minutes). Single-GPU training with no redundancy cannot afford to lose hours of work on a crash."
 - **Evidence**: Existing rules require checkpointing but only per-epoch. The V5-Small OOM crash at batch 2350 lost ~1.4 hours of training. With 6-8 hour epochs, a late-epoch crash could lose an entire day of compute.
+
+### 2026-03-27 — Step-Based Training Architecture
+- **Found in**: User request during monitoring sleep
+- **File to change**: `RLQuest/.claude/rules/training.md` + `firstrate_learning_v5/train.py`
+- **Recommended change**: Refactor training from epoch-centric to step-centric:
+  1. All checkpointing, evaluation, and logging defined in STEPS not epochs
+  2. Subset validation every N steps (e.g., 5000) for mid-epoch signal
+  3. Early stopping based on evaluation cycles, not epoch count
+  4. Step-based resume with exact batch position
+  5. Training config should specify `total_steps`, `checkpoint_every_steps`, `eval_every_steps` instead of `max_epochs`
+  6. Aligns with how LLMs (GPT, LLaMA) and modern large models are trained
+- **Evidence**: V5 epoch is ~22 hours. Epoch-based evaluation means 22hr wait for first metrics. Step-based gives midpoint signals. Also: OOM crash lost 2350 batches due to epoch-only checkpointing — intra-epoch checkpointing already partially addresses this.
+- **Reference**: See manual_docs/step_based_training.md for full design.
+- **Priority**: HIGH — implement in next architecture/training review cycle
+
+### 2026-03-28 — Prove-Out Mode + Updated Training Progression
+- **Found in**: Step 3 design review, cycle 5 (mode collapse analysis)
+- **File to change**: `RLQuest/.claude/rules/training.md`, `firstrate_learning_v5/train.py`
+- **Recommended changes**:
+  1. Add `--prove-out` flag: 20% of data (28/138 train chunks), 5 epochs, cosine schedule SCALED to prove-out length
+  2. Update training progression: `unit-test → prove-out → smoke-test → full`
+  3. Prove-out purpose: fast LR/recipe sweeps (~90 min per experiment, 4 experiments/day)
+  4. Prove-out must use SCALED cosine schedule (total_steps = proveout_epochs × proveout_batches, NOT full training steps)
+  5. Success signal in prove-out: train loss declines or stays flat across all 5 epochs, no mode collapse
+- **Evidence**: V5-Small mode collapsed at epoch 2 because cosine schedule was flat (spread over 566K steps). Took 45 min to discover. With prove-out (15 min/epoch × 5 = 75 min), same discovery in fraction of the time.
+- **Priority**: CRITICAL — implement before any more full training
+
+### 2026-03-28 — Cosine Schedule Bug Fix
+- **Found in**: Step 3 design review
+- **File to change**: `firstrate_learning_v5/train.py`
+- **Recommended change**: Scale total_steps in cosine schedule to actual run length, not max_epochs * full_data_batches. Current code computes total_steps = 50 * 11325 = 566K which makes LR barely decay for the first 10 epochs.
+- **Evidence**: At epoch 2, LR was 2.989e-4 vs 3.00e-4 peak — effectively flat. Combined with 6 loss components (weight sum 3.0), effective LR was ~9e-4.
+
+### 2026-03-28 — Iteration Speed as Design Requirement
+- **Found in**: User request during monitoring
+- **File to change**: `RLQuest/.claude/rules/training.md`, manager step3_design_review.md
+- **Recommended change**: Add explicit requirement that training design must enable ≥3 experiments per day. All training scripts must support a fast iteration mode (prove-out). Design reviews must evaluate iteration speed alongside model capacity and overfitting risk.
+- **Evidence**: V5-Small full epoch takes 45 min. Discovering mode collapse took 2 epochs = 90 min. With prove-out at 15 min/epoch, same discovery in 30 min. 3x faster feedback.

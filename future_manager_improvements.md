@@ -31,3 +31,20 @@ Recommendations for changes to manager process files (.claude/skills/manager/ste
 - **Step file to change**: step4_learn_update.md (goal tracker update instructions)
 - **Recommended change**: Add an "Infrastructure Readiness" section to the goal tracker template that tracks: torch.compile mode, checkpointing strategy (per-epoch vs intra-epoch), GPU memory headroom, known crash risks, and recovery plan. Currently the goal tracker focuses on model/data/recipe readiness but not infrastructure resilience.
 - **Evidence**: The goal tracker said "Full training NOT YET LAUNCHED" and constraint was "Execution" when in reality training had been launched, crashed, and the constraint had shifted to Infrastructure. The tracker had no fields for infrastructure status, so this gap went unrecorded until Step 1 of the next cycle discovered it.
+
+### 2026-03-28 — [MANAGER] Add Iteration Speed to Step 3 Design Review
+- **Found in**: User request during cycle 5
+- **Step file to change**: step3_design_review.md
+- **Recommended change**: Add section "3.7 Iteration Speed Assessment" with questions:
+  - How long does one epoch/prove-out take?
+  - How many experiments can be run per day?
+  - Is there a fast prove-out mode for quick hypothesis testing?
+  - Does the cosine/LR schedule scale correctly for shorter runs?
+  - Can mode collapse / overfitting be detected within 2-3 prove-out epochs?
+- **Evidence**: Mode collapse was not detected until 90 min into full training. With prove-out mode analysis in Step 3, the manager would have recommended prove-out sweeps before committing to a full run.
+
+### 2026-03-28 — [MANAGER] Updated Training Progression in Step 5 Validation
+- **Found in**: User request
+- **Step file to change**: step5_action_plan.md
+- **Recommended change**: Update the training validation gate progression to: `unit-test → prove-out (LR sweep) → smoke-test → full`. Prove-out must pass before smoke test. Smoke test must pass before full. Never skip prove-out for new recipes.
+- **Evidence**: V5-Small went straight from unit test to full training, skipping any fast recipe validation. Mode collapse discovered 90 min later.
