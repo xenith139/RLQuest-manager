@@ -1,174 +1,196 @@
-## Step 5: Action Plan — 2026-03-28 00:25 UTC
+## Step 5: Action Plan — 2026-03-28 04:10 UTC (Cycle 7)
 
-### Status: NEW PLAN — Stop training, implement prove-out mode, fix cosine schedule, run LR sweep
+### Status: NEW PLAN — Implement 2 step-based features, then launch full training
 
 ### All possible actions:
-1. **STOP current training** — epoch 3 still running (batch ~4600/11325), train loss rising (0.5924), wasting GPU time (BLOCKING, IMMEDIATE)
-2. **Implement --prove-out flag** — 20% data, 5 epochs, scaled cosine, --lr override, --tag arg (~30 lines of code)
-3. **Fix cosine schedule to scale to actual run length** — currently total_steps = max_epochs * batches_per_epoch = 566K, makes cosine flat for first 10 epochs (ROOT CAUSE of mode collapse)
-4. **Run LR sweep in prove-out mode** — P1: lr=1e-4 cosine, P2: lr=5e-5 cosine, P3: lr=3e-4 scaled cosine, P4: lr=1e-4 constant (~90 min each)
-5. **Relaunch full training with winning recipe** — only after sweep identifies stable recipe
-6. Fix summary token dims 14-19 (deferred)
-7. Fix price token dim 15 (deferred)
-8. Optimize IntraDayEncoder day-loop (deferred)
-9. Fix config.d_ff unused (deferred)
-10. Clean up zombie processes (cosmetic)
+1. **IMPLEMENT subset validation every 2000 steps** (~20 lines in train.py) — MANDATORY before full training
+2. **IMPLEMENT step-based early stopping** (~20 lines in train.py) — MANDATORY before full training
+3. **LAUNCH full training** with P4 recipe: `--full --lr 1e-4 --constant-lr --no-smoke` — AFTER items 1-2
+4. **Investigate return_mae=NaN** — return head broken, wastes 27% gradient budget (deferred, non-blocking for CR)
+5. Fix summary token dims 14-19 (deferred)
+6. Fix price token dim 15 (deferred)
+7. Optimize IntraDayEncoder day-loop (deferred)
+8. Fix config.d_ff unused (deferred)
+9. Clean up zombie processes (cosmetic, now 10)
+10. Consider loss weight rebalancing (future experiment)
 11. Design V5-Medium (premature)
 
-### Resources: GPU=BUSY (training epoch 3, WASTING TIME), CPU=BUSY (training), Dev=IDLE (at prompt)
+### Resources: GPU=IDLE, CPU=IDLE, Dev=IDLE (at prompt)
 
 ### Chosen action(s):
 
-**Actions #1, #2, #3, #4 in sequence: Stop training -> Implement prove-out + fix cosine -> Run LR sweep.**
+**Actions #1, #2, #3 in strict sequence: Implement subset eval -> Implement step-based early stopping -> Unit test both features -> Launch full training.**
 
-**Reasoning:** The constraint is TRAINING RECIPE. The root cause is identified with mathematical precision: cosine schedule over 566K steps = 99.6% of peak LR at epoch 2, combined with loss weights summing to 3.0 = effective LR ~9e-4 in single-task terms. Current training (epoch 3, batch ~4600) continues the degradation pattern (train loss 0.5924, rising). Every minute of continued training is wasted GPU time — best model from epoch 1 is already saved.
+**Reasoning:** The constraint is EXECUTION. The recipe is known (constant lr=1e-4, validated by P4 prove-out at 1.2x V3 baseline). Two features remain from the step_based_training.md spec:
+- Subset eval every 2000 steps: provides divergence detection in ~13 min vs ~72 min (5.5x faster feedback)
+- Step-based early stopping: max waste 104 min vs 18 hours (10x faster stopping)
 
-The prove-out approach (20% data, 5 epochs, ~90 min/experiment) enables testing 4 LR configurations in ~6 hours vs ~20 hours wasted on patience epochs with the broken recipe. The key insight is that mode collapse is visible by epoch 2 batch-level metrics (train loss rising), so prove-out will reproduce the diagnostic signal.
+These are ~40 lines total and ~30 min of coding. The 30 min investment prevents up to 17+ hours of wasted GPU time if full training diverges. GPU is idle — every minute spent coding is cheaper than a minute of divergent training.
 
-**Mandatory sequencing:**
-1. STOP current training FIRST (reclaim GPU)
-2. Implement prove-out mode AND fix cosine schedule (code changes while GPU idle)
-3. Run LR sweep P1-P4 in prove-out mode
-4. Only relaunch full training with the winning recipe
+**Chain: implement -> unit test -> verify -> launch full training -> monitor first 2000 steps.**
 
 ### Validation gate:
 
 **Implementation prerequisites:**
-- [ ] Current training stopped (kill PID 1245000)
-- [ ] Best model from epoch 1 preserved (best_model.pt, best_model_epoch1.pt) — VERIFY after stop
-- [ ] --prove-out flag added to argparse (mutually exclusive with --unit-test, --smoke-test, --full)
-- [ ] --lr override argument added (float, optional)
-- [ ] --tag argument added for run dir naming
-- [ ] data_loader.py: max_chunks parameter added to V5InterleavedDataset and V5SequentialDataset
-- [ ] prove-out: 28 train chunks, 13 val chunks, 5 epochs, warmup=200 steps
-- [ ] CRITICAL: cosine total_steps computed from ACTUAL run length (max_epochs * actual_batches_per_epoch), NOT from full-data calculation
-- [ ] Run dir named run_TIMESTAMP_proveout_{tag}
+- [ ] Subset eval: `eval_every_steps` parameter added to `train_epoch` (default: 2000)
+- [ ] Subset eval: `eval_fn` callable passed to `train_epoch` that runs 10% val data
+- [ ] Subset eval: `model.train()` called after each subset eval
+- [ ] Subset eval: metrics logged at each step-eval (val_loss, CR at minimum)
+- [ ] Step-based early stopping: `step_patience_counter` tracks consecutive non-improving step-evals
+- [ ] Step-based early stopping: `step_eval_patience` parameter (default: 8 eval cycles)
+- [ ] Step-based early stopping: `train_epoch` returns early_stop signal when patience exhausted
+- [ ] Step-based early stopping: outer epoch loop respects early_stop signal
 
-**Cosine schedule fix (applies to ALL modes, not just prove-out):**
-- [ ] total_steps = max_epochs * batches_per_epoch where batches_per_epoch reflects ACTUAL data size
-- [ ] Verify: in prove-out mode, total_steps = 5 * 2265 = 11,325 (NOT 566,250)
-- [ ] Verify: cosine_mult at epoch 2 of prove-out = cos(pi * 2/5) = ~0.31 (meaningful decay, not 0.996)
+**Unit test before full training:**
+- [ ] Run `--unit-test` or short prove-out to verify both features work without error
+- [ ] Step-eval fires at expected interval (batch 2000, 4000, etc.)
+- [ ] Step-eval metrics are logged and non-NaN (at least val_loss)
+- [ ] Step-based early stopping does NOT trigger during short test (patience should be large enough)
 
-**Unit test before sweep:**
-- [ ] prove-out mode runs 1 epoch without error
-- [ ] Batch count matches ~2265 (20% of 11,325)
-- [ ] LR at end of epoch 1 shows meaningful decay from peak
+**Training launch prerequisites:**
+- [ ] Unit test passed with both features active
+- [ ] GPU util >70% during unit test
+- [ ] AMP+FP16 enabled (already confirmed)
+- [ ] torch.compile active (already confirmed, mode='default')
+- [ ] Checkpoint/resume working (already confirmed — 9 fields in checkpoint)
+- [ ] Per-run directory created (already confirmed — run_TIMESTAMP_full_* pattern)
 
 **All actions:**
-- [x] Chained to follow-up: sweep results -> pick winner -> relaunch full with winning recipe
+- [x] Chained to follow-up: implement -> test -> launch -> monitor first 2000 steps
 - [x] Success criteria defined (below)
 - [x] Failure criteria defined (below)
 
 ### Parallel tracks:
-| Resource | During Code Changes | During Sweep | After Sweep |
-|----------|-------------------|-------------|-------------|
-| GPU | Idle (code only) | Prove-out experiments P1-P4 | Full training with winning recipe |
-| CPU | Idle | Data loading (20%) | Data loading (full) |
-| Dev | Implement prove-out + cosine fix | Launch P1, review, launch P2, etc. | Monitor epoch 1-2 of full run |
+| Resource | During Implementation (~30 min) | During Unit Test (~5 min) | During Full Training |
+|----------|-------------------------------|--------------------------|---------------------|
+| GPU | Idle | Unit test | Full training with P4 recipe |
+| CPU | Idle | Data loading | Data loading |
+| Dev | Coding both features | Verify features | Monitor first 2000-step eval, then let run |
 
 ### Success criteria:
-- **Stop:** PID 1245000 killed, best_model.pt and best_model_epoch1.pt still intact
-- **Implementation:** prove-out runs 1 epoch in ~15 min, batch count ~2265, cosine decays meaningfully
-- **Sweep:** At least one LR shows DECLINING or FLAT train loss across all 5 prove-out epochs. Val loss does not spike >10%. Precision/recall stay nonzero through epoch 5.
-- **Key signal:** Train loss trajectory. Must decline or stay flat. Any rise in epoch 2+ = recipe still broken.
+- **Implementation:** Both features added in ~40 lines, no regressions in existing train.py functionality
+- **Unit test:** Step-eval fires correctly, metrics logged, no crashes, no NaN in subset val loss
+- **Full training launch:** First 2000-step eval shows val_loss < 0.70 (reasonable range based on prove-out VL=0.61-0.70), prec > 0.3, rec > 0.3
+- **Full training completion:** Test CR > 0.0176 (exceed P4 prove-out), prec > 0.5, rec > 0.5, stable prec/rec through training
+- **Ultimate target:** Test CR >= 0.0192 (match V1 best ever)
 
 ### Failure criteria:
-- **All 4 LRs still show mode collapse in prove-out:** Multi-task loss conflict is the primary cause, not LR. Escalate to loss weight normalization experiment (normalize weights to sum to 1.0).
-- **Prove-out behavior does not transfer to full data:** If winning recipe collapses on full data, the 20% subset has different dynamics. Fall back to iterating on full data with reduced patience (patience=3).
-- **Implementation takes >30 min:** Simplify — just manually limit chunks by editing data_loader.py temporarily.
+- **Implementation bugs:** Step-eval crashes or corrupts training state (model not returned to train mode, optimizer state corrupted). Mitigation: unit test catches this before full run.
+- **Full training collapse:** Prec/rec collapse at full data scale despite constant LR. If this happens: the 5x data scale changes dynamics. Try lr=5e-5 constant or reduce loss weights to sum=1.0.
+- **return_mae=NaN persists:** Expected (known issue #13), not blocking. Investigate after full training completes. The return head (loss weight=0.8) is consuming 27% of gradient budget for zero useful signal — fixing this could meaningfully improve CR.
+- **Step-eval overhead too high:** Subset eval should take ~49 sec per call (127 batches at 156 batches/min). If >2 min, reduce subset to 3 chunks (5%) instead of 6 chunks (10%).
 
 ---
 
 ## Recommended Prompt
 
 ```
-STOP the current training run immediately. It is wasting GPU time — mode collapsed at epoch 2 and train loss has been rising since (now 0.5924 at epoch 3 batch 4600). Best model from epoch 1 is already saved.
+Implement two step-based training features in train.py, then launch full training. These are the last items from the step-based training spec before we can run the full training with the proven P4 recipe.
 
-Kill PID 1245000:
-```bash
-kill 1245000
+## Feature 1: Subset Validation Every 2000 Steps
+
+Add mid-epoch evaluation to catch divergence early (13 min vs 72 min for full-epoch eval).
+
+### Changes to `train_epoch()`:
+
+Add two new parameters:
+- `eval_every_steps: int = None` — if set, run subset validation every N batches
+- `eval_fn: callable = None` — function that runs subset validation and returns metrics dict
+
+Inside the batch loop, AFTER the existing checkpoint logic (around line 162), add:
+
+```python
+# Subset validation every eval_every_steps batches
+if eval_fn is not None and eval_every_steps and batch_idx > 0 and batch_idx % eval_every_steps == 0:
+    sub_metrics = eval_fn()
+    logger.info(f"    [step-eval @ batch {batch_idx}] VL={sub_metrics['loss']:.4f} "
+                f"CR={sub_metrics.get('captured_return', 0):.4f} "
+                f"Prec={sub_metrics.get('precision', 0):.3f} Rec={sub_metrics.get('recall', 0):.3f}")
+    model.train()  # CRITICAL: evaluate() sets model.eval(), must restore train mode
+    # Check step-based early stopping
+    if sub_metrics.get('early_stop', False):
+        logger.info(f"    Step-based early stopping triggered at batch {batch_idx}")
+        return {'loss': running_loss / (batch_idx + 1), 'early_stop': True}
 ```
 
-Verify best model is preserved:
-```bash
-ls -la /home/ubuntu/workspace/RLQuest/firstrate_learning_v5/models/run_20260327_224100_full/best_model*.pt
+### Changes to `train()`:
+
+Build a subset validation loader with ~10% of val data (6 of 63 chunks):
+```python
+# Create subset val loader for step-based evaluation
+subset_val_dataset = V5SequentialDataset(val_chunks[:6], ...)  # 10% of val data
+subset_val_loader = DataLoader(subset_val_dataset, batch_size=config.batch_size, ...)
 ```
 
-Then implement these changes to enable rapid LR experimentation:
+Create the eval_fn as a closure that:
+1. Calls `evaluate(model, subset_val_loader, criterion, device)`
+2. Tracks best subset val score and patience counter
+3. Returns metrics dict with an `early_stop` flag if patience exhausted
 
-## 1. Fix the cosine schedule (ROOT CAUSE of mode collapse)
+Pass `eval_every_steps=2000` and `eval_fn` to `train_epoch()`.
 
-The cosine schedule computes total_steps = max_epochs * batches_per_epoch = 50 * 11325 = 566,250. This means at epoch 2 the LR is still 99.6% of peak — effectively NO decay. Combined with loss weights summing to 3.0 (effective LR ~9e-4), this causes the model to overshoot the minimum found in epoch 1.
+## Feature 2: Step-Based Early Stopping
 
-The fix: total_steps must be computed AFTER we know actual batches_per_epoch (from the data loader). This is already the case in the code (line 361), but prove-out mode will have fewer batches per epoch, so the schedule will naturally scale. Just ensure total_steps uses the real batches_per_epoch from the actual data loaded.
+Instead of patience counted in full epochs (which could waste 18 hours), count patience in step-eval cycles (max waste ~104 min).
 
-## 2. Add prove-out mode to train.py
+### Implementation:
 
-Add these arguments to the argparser:
-- `--prove-out` in the mutually exclusive group (with --unit-test, --smoke-test, --full)
-- `--lr` (float, optional) — override learning rate for any mode
-- `--tag` (str, optional) — suffix for run directory name
+In `train()`, create a closure for eval_fn that tracks:
+- `best_step_score` — best captured_return seen at any step-eval
+- `step_patience_counter` — incremented when step-eval doesn't improve best_step_score
+- `step_eval_patience = 8` — number of non-improving step-evals before stopping
 
-When `--prove-out` is set:
-- `max_epochs = 5`
-- `warmup_steps = 200`
-- Pass `max_chunks=28` to the train data loader (20% of 138 train chunks)
-- Pass `max_chunks=13` to the val data loader (20% of 63 val chunks)
-- Disable early stopping (set patience = max_epochs + 1)
-- Run dir name: `run_TIMESTAMP_proveout_{tag}`
-- When `--lr` is provided, override the config learning rate
+The eval_fn closure should:
+1. Run `evaluate(model, subset_val_loader, criterion, device)`
+2. Compare `captured_return` to `best_step_score`
+3. If improved: reset patience counter, update best_step_score
+4. If not improved: increment patience counter
+5. If patience exhausted: set `early_stop = True` in returned metrics
+6. Return full metrics dict including `early_stop` flag
 
-## 3. Add max_chunks support to data_loader.py
+In the outer epoch loop, check the return value from `train_epoch()`. If it contains `early_stop: True`, break out of the epoch loop.
 
-In `V5InterleavedDataset.__init__` and `V5SequentialDataset.__init__`:
-- Add `max_chunks: int = None` parameter
-- After building the chunk file list, if max_chunks is set, truncate to `chunks[:max_chunks]`
-- This limits data while keeping the same chunked loading logic
+**Important:** The step-based early stopping should work ALONGSIDE the existing epoch-based early stopping, not replace it. The step-based check catches fast divergence mid-epoch. The epoch-based check (patience=15 on full validation) catches gradual degradation across epochs.
 
-## 4. Run the LR sweep
+## After Implementation: Unit Test
 
-After implementing, run these experiments sequentially. Each takes ~90 min (5 epochs * ~15 min/epoch + validation):
-
+Run a quick verification:
 ```bash
-# P1: lr=1e-4 with cosine (3x reduction from current)
-cd /home/ubuntu/workspace/RLQuest && python -m firstrate_learning_v5.train --prove-out --lr 1e-4 --tag lr1e-4_cosine
-
-# P2: lr=5e-5 with cosine (6x reduction)
-cd /home/ubuntu/workspace/RLQuest && python -m firstrate_learning_v5.train --prove-out --lr 5e-5 --tag lr5e-5_cosine
-
-# P3: lr=3e-4 with cosine (same lr, but now cosine actually decays over 5 epochs instead of 50)
-cd /home/ubuntu/workspace/RLQuest && python -m firstrate_learning_v5.train --prove-out --lr 3e-4 --tag lr3e-4_scaled_cosine
-
-# P4: lr=1e-4 with constant schedule (no cosine decay at all — tests if cosine is needed)
-cd /home/ubuntu/workspace/RLQuest && python -m firstrate_learning_v5.train --prove-out --lr 1e-4 --tag lr1e-4_constant --constant-lr
+cd /home/ubuntu/workspace/RLQuest && python -m firstrate_learning_v5.train --prove-out --lr 1e-4 --constant-lr --tag step_eval_test
 ```
 
-For P4, also add a `--constant-lr` flag that makes the LR schedule return 1.0 after warmup (no cosine decay).
+Let it run for at least 2001 batches (one step-eval trigger). Verify:
+1. Step-eval fires at batch 2000
+2. Step-eval metrics are logged (VL, CR, Prec, Rec)
+3. No crash, no NaN in subset val loss
+4. Model continues training after step-eval (train mode restored)
+5. Kill after verification — don't need full prove-out
 
-**Start with P1 (lr=1e-4 cosine).** If P1 shows declining train loss across all 5 epochs, you can skip P2 and go straight to full training with that recipe.
+## After Unit Test: Launch Full Training
 
-## What to look for in each experiment
+```bash
+cd /home/ubuntu/workspace/RLQuest && python -m firstrate_learning_v5.train --full --lr 1e-4 --constant-lr --no-smoke --tag full_constant_v1
+```
 
-The KEY diagnostic is the train loss trajectory across epochs:
-- GOOD: train loss declines or stays flat across all 5 epochs
-- BAD: train loss rises in epoch 2+ (same pattern as current run)
+This is the P4 recipe (proven stable on 20% data, 1.2x V3 baseline) with step-based eval for safety.
 
-Also check:
-- Val loss: should not spike >10% between epochs
-- Precision/recall: should stay nonzero
-- P@5: should not collapse
+Expected behavior at full scale:
+- ~11,325 batches/epoch, ~72 min/epoch
+- Step-eval at batches 2000, 4000, 6000, 8000, 10000 (~5 per epoch)
+- First divergence signal at ~13 min
+- If stable: let it run. Best epoch may be later than prove-out (more data = slower convergence per epoch).
+- Step-based early stopping (patience=8 step-evals) catches plateau in ~104 min max.
 
-After completing the sweep (or after P1 if it clearly works), report:
-1. Train loss per epoch for each experiment
-2. Val loss per epoch for each experiment
-3. Which recipe showed the most stable training
-4. Recommendation for full training launch
+## What to Report After Launch
 
-## New training progression going forward
+After the first step-eval fires (batch 2000, ~13 min), report:
+1. Subset val loss
+2. Subset CR, precision, recall
+3. Train loss trend (is it declining?)
+4. GPU utilization
+5. Any errors or warnings
 
-unit-test -> prove-out (20% data, 5 epochs) -> smoke-test (if needed) -> full training
-
-Never launch full training without first validating the recipe in prove-out mode. This saves 10-20 hours per failed recipe.
+Then let it continue running. The step-based eval and early stopping will manage it automatically.
 ```
 
 ---
@@ -180,32 +202,38 @@ Never launch full training without first validating the recipe in prove-out mode
   - Cycle 3 (~22:30 UTC): Identified delivery bottleneck. Training WAS launched independently.
   - Cycle 4 (~22:35 UTC): Training crashed at batch 2350 (OOM). Analyzed root cause. Planned 3 fixes.
   - Cycle 5 (~22:45 UTC): Planned OOM fix + relaunch. Fixes were applied, training relaunched successfully.
-  - Cycle 6 (~00:25 UTC): THIS CYCLE. Training completed 2 epochs + running epoch 3. Epoch 1 good (CR=0.0138), epoch 2+ mode collapse. Root cause: cosine over 566K steps = flat LR + loss weights 3.0 = effective LR 9e-4. Planning stop + prove-out + sweep.
+  - Cycle 6 (~00:25 UTC): Planned stop + prove-out + LR sweep. Dev executed all 4 experiments successfully.
+  - Cycle 7 (~04:10 UTC): THIS CYCLE. Planning step-based feature implementation + full training launch.
 - **Pending items:**
-  - Fix summary token dims 14-19 (after training recipe solved)
-  - Fix price token dim 15 (after training recipe solved)
-  - Optimize IntraDayEncoder day-loop (after training recipe solved)
+  - return_mae=NaN investigation (after full training — return head broken, 27% gradient waste)
+  - Fix summary token dims 14-19 (after training validated)
+  - Fix price token dim 15 (after training validated)
+  - Optimize IntraDayEncoder day-loop (after training validated)
   - Fix config.d_ff unused bug (maintenance)
-  - Clean up zombie processes (cosmetic, now 7 total)
-  - Consider normalizing loss weights to sum to 1.0 (if LR sweep alone doesn't fix collapse)
+  - Clean up zombie processes (cosmetic, now 10)
+  - Consider loss weight rebalancing / per-head LR (future experiment to unlock cosine schedule)
+  - Consider disabling return head entirely (w_return=0.0) to reclaim 27% gradient budget (future experiment)
 - **Validation patterns:**
-  - torch.compile mode='reduce-overhead' causes OOM with variable shapes — RESOLVED, never use again
-  - Per-epoch-only checkpointing inadequate for 6-8 hour epochs — RESOLVED, intra-epoch saves added
-  - Cosine schedule over max_epochs*full_batches is functionally flat for early epochs — ROOT CAUSE, being fixed
-  - Multi-task loss weight sum amplifies effective LR — must account for in LR selection
-  - V4 had same recipe failure (lr=3e-4, cosine over max_epochs) — cross-version pattern matching is critical
+  - torch.compile mode='reduce-overhead' causes OOM — NEVER use again
+  - Per-epoch-only checkpointing inadequate for long epochs — RESOLVED
+  - Cosine schedule flat over 566K steps — RESOLVED via constant LR
+  - Multi-task loss weight sum 3.0 amplifies effective LR — compensated by lr=1e-4
+  - Cosine decay triggers multi-task loss conflict — RESOLVED via constant LR
+  - return_mae=NaN across ALL experiments — return head broken, not blocking CR
+  - model.eval()/model.train() toggle during step-eval is a correctness risk — unit test must verify
 - **Effective prompts:**
-  - Detailed fix prompts with exact line numbers and before/after code work well
-  - Verification checklists ensure dev confirms fixes
-  - Including "reason" for each change helps dev prioritize correctly
-  - Sequencing instructions (do X THEN Y) prevent dev from skipping prerequisites
+  - Detailed code change specs with exact locations (line numbers, function names) work well
+  - Including "why" for each change helps dev prioritize
+  - Sequencing instructions (implement -> test -> launch) prevent skipped prerequisites
+  - Including verification steps with expected outputs catches bugs early
+  - Kill-after-verification pattern for unit tests saves time
 - **Watch items for next cycle:**
-  - Has current training been stopped? Check PID 1245000 is dead.
-  - Has prove-out mode been implemented? Check for --prove-out in train.py argparse.
-  - Has --lr override been added? Check argparse.
-  - Has max_chunks been added to data_loader.py? Check V5InterleavedDataset init.
-  - Is cosine schedule scaling correctly for prove-out? total_steps should = 5 * ~2265 = ~11,325 for prove-out.
-  - Has P1 (lr=1e-4 cosine) been launched? Check for proveout run dirs.
-  - If P1 completed: does train loss decline across 5 epochs? This is the key signal.
-  - Best model from epoch 1 PRESERVED (best_model.pt, best_model_epoch1.pt) — safety net.
-  - New progression: unit-test -> prove-out -> smoke-test -> full. Enforce this going forward.
+  - Has dev implemented subset eval every 2000 steps? Check train.py for eval_every_steps.
+  - Has dev implemented step-based early stopping? Check train.py for step_patience_counter.
+  - Did unit test pass? Check for step-eval log lines at batch 2000.
+  - Has full training been launched? Check for run dir matching `run_*_full_constant_v1`.
+  - If full training running: check first step-eval metrics (batch 2000, ~13 min in).
+  - First step-eval: VL < 0.70, prec > 0.3, rec > 0.3, train loss declining.
+  - return_mae=NaN still expected (known issue, not blocking).
+  - Zombie process count (was 10).
+  - Goal tracker is current as of cycle 6 — will need update after full training launches.

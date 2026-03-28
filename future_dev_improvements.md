@@ -75,3 +75,17 @@ Recommendations for changes to dev workspace files. These should be applied by a
 - **File to change**: `RLQuest/.claude/rules/training.md`, manager step3_design_review.md
 - **Recommended change**: Add explicit requirement that training design must enable ≥3 experiments per day. All training scripts must support a fast iteration mode (prove-out). Design reviews must evaluate iteration speed alongside model capacity and overfitting risk.
 - **Evidence**: V5-Small full epoch takes 45 min. Discovering mode collapse took 2 epochs = 90 min. With prove-out at 15 min/epoch, same discovery in 30 min. 3x faster feedback.
+
+### 2026-03-28 — Investigate return_mae=NaN in Return Prediction Head
+- **Found in**: Step 3, Cycle 6
+- **File to change**: `firstrate_learning_v5/model.py` (return prediction head), `firstrate_learning_v5/train.py` (return loss computation)
+- **Recommended change**: Debug why `return_mae` is NaN across ALL prove-out experiments. Likely the `pred_return` output is producing NaN or Inf. Check: (1) the return prediction head output range, (2) the Huber loss input validity, (3) whether AMP FP16 causes overflow in the return head. Add NaN guard or clamp on pred_return output.
+- **Evidence**: ALL 4 prove-outs (P1-P4) show return_mae=NaN and return_corr=0.0 in test metrics. The return head is not contributing to CR (which comes from classification heads), but it consumes a loss component (weight=0.8, second highest) and gradient budget. Fixing this could improve training efficiency.
+- **Priority**: MEDIUM — not blocking CR, but wastes gradient budget on a broken head.
+
+### 2026-03-28 — Add Subset Validation and Step-Based Early Stopping to train.py
+- **Found in**: Step 3, Cycle 6 (design review of step_based_training.md spec)
+- **File to change**: `firstrate_learning_v5/train.py`
+- **Recommended change**: (1) Add `eval_every_steps` parameter to `train_epoch` — run 10% of val data every 2000 steps for mid-epoch divergence detection. (2) Add step-based early stopping — patience in eval cycles instead of epochs. See step3_output.md Cycle 6 for detailed implementation design (~40 lines total).
+- **Evidence**: Full data epoch takes ~72 min. Without step-based eval, divergence detection takes 72 min minimum. With eval every 2000 steps, detection in ~13 min. Step-based early stopping reduces max wasted compute from 18 hours to 104 min.
+- **Priority**: HIGH — implement before full training launch.

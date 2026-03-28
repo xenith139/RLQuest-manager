@@ -48,3 +48,9 @@ Recommendations for changes to manager process files (.claude/skills/manager/ste
 - **Step file to change**: step5_action_plan.md
 - **Recommended change**: Update the training validation gate progression to: `unit-test → prove-out (LR sweep) → smoke-test → full`. Prove-out must pass before smoke test. Smoke test must pass before full. Never skip prove-out for new recipes.
 - **Evidence**: V5-Small went straight from unit test to full training, skipping any fast recipe validation. Mode collapse discovered 90 min later.
+
+### 2026-03-28 — [MANAGER] Step 3 Should Cross-Check All Loss Heads for NaN/Degenerate Output
+- **Found in**: Step 4, Cycle 6
+- **Step file to change**: step3_design_review.md
+- **Recommended change**: Add to Step 3 design review checklist: "For each loss head, verify that test metrics show non-NaN, non-zero values. If any head produces NaN (e.g., return_mae=NaN), flag as a WARNING even if not blocking the primary metric." Step 3 noted the NaN but classified it as non-blocking. A broken loss head consuming gradient budget (weight=0.8) should be flagged more prominently.
+- **Evidence**: return_mae=NaN across ALL 4 prove-outs. The return head has weight=0.8 (second highest loss component) but produces no useful gradient signal. This wastes ~27% of the effective gradient budget (0.8/3.0). Step 3 correctly identified this but did not escalate it as a potential training efficiency issue.

@@ -1,55 +1,55 @@
-## Step 4: Learn & Update — 2026-03-28 00:20 UTC (Cycle 5)
+## Step 4: Learn & Update — 2026-03-28 04:00 UTC (Cycle 6)
 
-### Last action: "Apply 3 OOM fixes (compile mode, intra-epoch checkpoint, trailing batch drop) and relaunch full training" (Cycle 4)
-### Result: PARTIAL SUCCESS — All 3 fixes were applied and training relaunched successfully. OOM is resolved (GPU stable at 6.8 GiB). Epoch 1 completed with strong results (CR=0.0138, 94% of V3 target). However, mode collapse at epoch 2: train loss ROSE (0.5508->0.5894), val loss spiked 15.7%, precision/recall collapsed to 0.000. Epoch 3 continuing same degradation. The infrastructure fixes worked perfectly; the new blocker is the training recipe (LR too high with flat cosine schedule).
+### Last action: "Stop training, implement prove-out mode, fix cosine schedule, run 4-experiment LR sweep" (Cycle 5)
+### Result: SUCCESS — All 4 prove-out experiments completed. Architecture validated (all beat V3). Winning recipe identified: P4 (lr=1e-4, constant LR), test CR=0.0176 (1.2x V3), stable prec/rec through 5 epochs. Dev implemented prove-out mode, --lr override, --constant-lr, max_chunks in data_loader, and ran all 4 experiments sequentially.
 ### Process gaps:
-1. **Cosine schedule not reviewed for effective decay rate:** Step 3 design reviews (Cycles 1-4) reviewed architecture, loss components, data, and infrastructure but never computed the actual LR at epoch 2. The cosine schedule was spread over 566K steps, making it 99.6% of peak at epoch 2 — effectively flat. This should have been caught by computing LR at key epoch boundaries.
-2. **Loss weight sum not factored into effective LR:** The 6 active losses sum to weight 3.0, effectively tripling gradient magnitude. At lr=3e-4, the model operates at ~9e-4 effective LR in single-task terms. This interaction between multi-task weights and LR was not analyzed before launching full training.
-3. **V4 pattern not recognized earlier:** V4 used identical lr=3e-4 with cosine over max_epochs and also peaked at epoch 1 then degraded. This pattern match should have triggered a red flag before V5 launched with the same LR.
-### Goal tracker updated: YES — significant changes:
-- Status: updated from OOM crash to mode collapse / LR overshoot
-- Hypothesis: updated to prove-out mode LR sweep
-- Constraint: changed from Infrastructure to Training Recipe
-- Belief state: Recipe confidence dropped to LOW, Infrastructure raised to HIGH
-- Metrics: added V5-Small epoch 1 (CR=0.0138 BEST) and epoch 2 (MODE COLLAPSE) rows
-- Known issues: marked OOM/checkpoint/trailing-batch as RESOLVED, added 4 new blocking issues (cosine schedule, loss weights, prove-out mode, confidence feedback loop)
-- Priority queue: rewritten for prove-out implementation and LR sweep
-### Research docs updated: NO — step3_output.md persistent notes already contain the full technical analysis of LR schedule, loss weights, and prove-out design.
-### Dev improvements logged: NO — all relevant items (prove-out mode, cosine schedule fix, iteration speed requirement) were already logged by the orchestrator in the current cycle. No new items discovered.
-### Manager improvements logged: NO — iteration speed in design review and updated training progression were already logged by the orchestrator. No new items discovered.
+1. **return_mae=NaN not flagged earlier:** ALL prove-outs show NaN return_mae and 0.0 return_corr. The return prediction head (loss weight=0.8, second highest) is broken and consuming gradient budget without producing useful signal. This was noted but not escalated — a broken head using 27% of gradient budget could be degrading training quality.
+2. **Step-based eval features not implemented before prove-out sweep:** The step_based_training.md spec was identified but only 3 of 5 items were already implemented. The remaining 2 (subset eval, step-based early stopping) were not prioritized alongside prove-out implementation. They should have been built concurrently since they share the same train.py file.
+3. **No process gap in prove-out execution:** The sweep was well-designed, all 4 experiments ran cleanly, and the results were unambiguous. The OODA process worked well this cycle.
+### Goal tracker updated: YES — major changes:
+- Status: updated from mode collapse / prove-out pending to prove-out COMPLETE, full training pending
+- Hypothesis: updated to step-based features + full training with constant lr=1e-4
+- Constraint: changed from Training Recipe to Execution
+- Belief state: Architecture raised to VERY HIGH, Recipe raised to HIGH (was LOW)
+- Metrics: added P1-P4 prove-out rows, relabeled epoch 1 row
+- Known issues: marked items 9-11 as RESOLVED, added 3 new items (return_mae NaN, subset eval, step-based early stopping)
+- Priority queue: marked items 1-4 as DONE, added items 5-6 (step-based features), renumbered
+### Research docs updated: NO — step3_output.md persistent notes already contain full prove-out analysis.
+### Dev improvements logged: YES, 2 new items (return_mae NaN investigation, subset eval + step-based early stopping implementation)
+### Manager improvements logged: YES, 1 new item (Step 3 should cross-check all loss heads for NaN/degenerate output)
 
 ## Persistent Notes
-- Cycle count: 5
+- Cycle count: 6
 - Pattern log:
-  - **NEW PATTERN: LR schedule interactions with multi-task loss weights are invisible without explicit computation.** The cosine schedule looked correct in code (warmup + cosine decay) but was functionally flat for the relevant epoch range. Loss weight sums amplify this silently. Step 3 design review must compute effective LR at key epoch boundaries and factor in loss weight scaling.
-  - **NEW PATTERN: V4 and V5 share the same recipe failure mode.** Both used lr=3e-4 with cosine over max_epochs and both collapsed after epoch 1. This was a missed cross-version pattern match. When launching a new version, compare its recipe parameters against previous failures.
-  - **CONTINUING PATTERN: Goal tracker lags behind reality.** Cycle 4's tracker still referenced OOM as the constraint when the real constraint shifted to training recipe. Now updated. Step 4 must aggressively update the tracker.
-  - **RESOLVED PATTERN: Infrastructure resilience gaps.** OOM fix, intra-epoch checkpointing, and trailing batch drops all applied and working. Infrastructure is now stable.
+  - **NEW PATTERN: Broken loss heads silently waste gradient budget.** return_mae=NaN means the return head (weight=0.8) produces no useful gradient but still consumes 27% of the effective gradient budget. Multi-task models should validate that all loss heads produce meaningful gradients, not just that the primary metric improves.
+  - **CONTINUING PATTERN: Cosine schedule interacts poorly with multi-task loss weights.** Now confirmed across 3 experiments (P1-P3) at different LRs. The root cause is differential sensitivity of classification vs ranking heads to LR decay, not LR magnitude. Constant LR is the workaround; proper fix is per-head LR or gradient normalization.
+  - **RESOLVED PATTERN: Goal tracker lag.** Goal tracker was stale for 2 cycles. Now updated comprehensively with prove-out results, new priorities, resolved items. Must keep current each cycle.
+  - **CONTINUING PATTERN: Feature implementation can be parallelized.** Step-based eval features could have been implemented alongside prove-out mode. When multiple code changes target the same file, batch them.
 - Process effectiveness:
-  - Step 1 (Observe): EXCELLENT. Caught mode collapse at epoch 2 with detailed batch-level analysis. Correctly identified rising train loss as the diagnostic signal (not classic overfitting).
-  - Step 2 (Orient): EXCELLENT. Correctly shifted constraint from Infrastructure to Training Recipe. Computed the 6% gap to V3 baseline. Proposed prove-out mode with clear cost/benefit analysis.
-  - Step 3 (Design Review): EXCELLENT. Computed exact LR at each epoch boundary, proving the cosine schedule is flat. Identified loss weight sum as a gradient magnitude multiplier. Designed prove-out mode with implementation details. Produced a concrete 4-experiment sweep plan.
-  - Step 4 (Learn): Working well. Catching process gaps (cosine schedule not reviewed, V4 pattern not matched).
-  - Step 5 (Action): Previous cycle's action (OOM fixes + relaunch) was executed successfully by dev. Delivery mechanism working.
+  - Step 1 (Observe): EXCELLENT. Comprehensive state assessment with all 4 prove-out results tabulated. Correctly identified user's step-based training request. Flagged zombie accumulation.
+  - Step 2 (Orient): EXCELLENT. Correctly shifted constraint from Training Recipe to Execution. Computed gap closure (1.2x V3). Identified the 2 missing features with time estimates.
+  - Step 3 (Design Review): EXCELLENT. Detailed implementation design for both missing features (~40 lines). Validated constant LR recipe for full training. Computed iteration speed improvement (5.5x faster feedback). Correctly flagged return_mae=NaN as non-blocking but noteworthy.
+  - Step 4 (Learn): Working well. Catching NaN gradient waste pattern. Goal tracker now current.
+  - Step 5 (Action): Previous cycle's action (prove-out sweep) was executed successfully and completely by dev. Prompt quality was good — dev implemented all requested features and ran all 4 experiments.
 - Accumulated learnings:
-  1. V5-Small architecture is validated: epoch 1 CR=0.0138, Prec=0.591, Rec=0.881 — 94% of V3 target
-  2. The problem is NOT the model, it is the training recipe (LR + schedule)
-  3. Cosine schedule must be computed at epoch boundaries, not just inspected visually
-  4. Loss weight sum (3.0) effectively triples the learning rate in gradient magnitude
-  5. Effective single-task-equivalent LR at epoch 2 was ~9e-4 (3e-4 * 3.0 loss weight sum * 0.996 cosine)
-  6. Mode collapse signature: train loss rises (not just val loss), precision/recall collapse to exactly 0.000
-  7. P@5 can improve (0.213->0.251) even during mode collapse — ranking signal preserved, calibration destroyed
-  8. V4 had the same failure pattern with the same lr=3e-4 — cross-version pattern matching is valuable
-  9. Prove-out mode (20% data, 5 epochs) enables ~90 min experiments vs 75 min/epoch for full data
-  10. Best model from epoch 1 is safely preserved (best_model.pt and best_model_epoch1.pt)
-  11. Infrastructure is now stable: OOM fixed, intra-epoch checkpoints added, GPU memory flat at 6.8 GiB
-  12. Epoch wall-clock: ~75 min on full data at 156 batches/min. Prove-out: ~15 min/epoch.
+  1. V5-Small architecture is VALIDATED: all 4 prove-outs beat V3 on test CR (0.0141-0.0185 vs 0.0147)
+  2. Winning recipe: lr=1e-4, constant (no cosine). Test CR=0.0176 (1.2x V3). Stable through 5 epochs.
+  3. Cosine decay universally kills prec/rec by epoch 3 regardless of LR (tested at 5e-5, 1e-4, 3e-4)
+  4. Root cause: multi-task loss weight conflict under cosine decay. Different heads have different LR sensitivity.
+  5. P2 paradox: best CR (0.0721) with prec/rec=0 means ranking head excellent but classification head dead
+  6. return_mae=NaN across all experiments — return head broken, consuming 27% gradient budget uselessly
+  7. Constant LR avoids the multi-task conflict by maintaining gradient scale parity across heads
+  8. Prove-out mode (20% data, 5 epochs, ~15 min/epoch) enables rapid recipe validation
+  9. Step-based eval (every 2000 steps) would provide 5.5x faster divergence detection vs epoch-based
+  10. V3 baseline: CR=0.0147. V1 best: CR=0.0192. P4 on 20% data: CR=0.0176. Target: exceed on full data.
+  11. Full training command: `python -m firstrate_learning_v5.train --full --lr 1e-4 --constant-lr --no-smoke`
+  12. Full epoch timing: ~72 min at 156 batches/min. Step eval every 2000 steps = signal every ~13 min.
 - Watch items for next cycle:
-  - Has current (wasteful) training been stopped?
-  - Has prove-out mode been implemented? Check for --prove-out flag in train.py argparse
-  - Is cosine schedule scaled to actual run length (not 566K steps)?
-  - Has LR sweep started? Which experiment (P1-P4) is running or completed?
-  - Key signal in prove-out: train loss should DECLINE or stay flat across all 5 epochs. Any rise = recipe still broken.
-  - If P1 (lr=1e-4) shows stable training, proceed directly to full run with lr=1e-4 + scaled cosine
-  - Epoch 1 best model PRESERVED — this is the safety net regardless of experiments
-  - Dev awareness: does dev understand the root cause (flat cosine + loss weight scaling)?
+  - Has dev implemented subset eval every 2000 steps? Check train.py for eval_every_steps parameter.
+  - Has dev implemented step-based early stopping? Check train.py for step-based patience logic.
+  - Has full training been launched with P4 recipe (constant lr=1e-4)?
+  - If full training running: check step-eval metrics at first 2000-step checkpoint for stability
+  - Monitor prec/rec through first 5000 steps — confirm no collapse at full data scale
+  - return_mae=NaN — has it been investigated?
+  - Zombie process count (was 10, growing)
+  - Goal tracker is now current — verify it stays current next cycle

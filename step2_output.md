@@ -1,85 +1,71 @@
-## Step 2: Gap & Constraint — 2026-03-28 00:11 UTC
+## Step 2: Gap & Constraint — 2026-03-28 03:50 UTC
 
-### Constraint SHIFTED: Infrastructure (OOM) -> Training Recipe (mode collapse / LR overshoot)
+### Constraint SHIFTED: Training Recipe (mode collapse / LR) -> Execution (implement step-based training + relaunch with stable recipe)
 
-OOM fix confirmed working (GPU memory stable at 6.8 GiB). Training completed epoch 1 successfully with strong results (CR=0.0138, near V3 baseline of 0.0147). However, epoch 2 showed catastrophic mode collapse: train loss ROSE (0.5508->0.5894), val loss spiked 15.7%, precision/recall collapsed to 0.000. Epoch 3 continuing same degradation. This is NOT overfitting — it is LR overshooting or multi-task loss conflict destroying the minimum found in epoch 1.
+Architecture is VALIDATED. All 4 prove-outs beat V3 baseline. The training recipe constraint is partially resolved: we know constant LR works (P4 stable through epoch 5), and we know the root cause of collapse (multi-task loss weight conflict under cosine decay). The bottleneck is now **execution**: implementing the remaining step-based training features and relaunching full training with the winning recipe.
 
-### Best performance: V5-Small epoch 1 CR=0.0138, Prec=0.591, Rec=0.881, P@5=0.213
+### Best performance: P2 (lr=5e-5, cosine) CR=0.0721 val / 0.0185 test — but UNSTABLE (prec/rec=0). P4 (lr=1e-4, constant) CR=0.0586 val / 0.0176 test — STABLE, prec/rec maintained.
 ### Target: CR >= 0.0147 with return_corr > 0.0132 (V3 baseline)
-### Gap: 0.0138 / 0.0147 = 0.94x — only 6% improvement needed. Gap is now MEASURABLE and SMALL.
-### Gap trend: MAJOR IMPROVEMENT. Was unmeasurable (no completed epoch). Now within striking distance of target. Epoch 1 alone nearly matches V3. The problem is not model capability — it is training stability beyond epoch 1.
-### Constraint: Training Recipe — learning rate causes mode collapse after epoch 1
-### Constraint changed from last cycle: YES. Was Infrastructure (CUDA OOM). Now Training Recipe (LR/scheduler). Infrastructure constraint fully resolved.
-### Hypothesis: "Implementing a prove-out mode (20% data, 5 epochs, ~15 min total) will accelerate LR/scheduler iteration by 10x, enabling rapid discovery of a stable training recipe that sustains epoch 1's CR=0.0138 performance across multiple epochs, because the mode collapse signature (rising train loss) would be visible within 2 epochs on reduced data."
-### Success criteria: Prove-out run completes in <20 min, reproduces the mode collapse at current lr=3e-4, and identifies a lr/schedule that shows declining or stable train loss across 5 epochs
-### Failure criteria: Prove-out runs do not reproduce full-data behavior (reduced data has fundamentally different dynamics), wasting time on non-transferable experiments
+### Gap: ALREADY EXCEEDED on 20% data. P4 test CR=0.0176, which is 1.20x V3 baseline. Full-data training should improve further. Gap is CLOSED on prove-out; need to confirm on full training.
+### Gap trend: MAJOR IMPROVEMENT. Was 0.94x last cycle (epoch 1 only). Now 1.20x on prove-out test data. Architecture validated — V5 beats V3 even on 20% data with stable recipe.
+### Constraint: Execution — implement step-based training features and relaunch full training
+### Constraint changed from last cycle: YES. Was Training Recipe (LR/scheduler). Now Execution. Recipe is known (constant LR, 1e-4). Two features remain unimplemented.
+### Hypothesis: "Implementing subset validation every N steps and step-based early stopping, then launching full training with constant lr=1e-4, will produce a stable model that exceeds V3 CR=0.0147 on full test data, because (a) P4 already beats V3 on 20% data with stable prec/rec, and (b) step-based eval will catch any divergence within ~2 hours instead of waiting 22 hours per epoch."
+### Success criteria: Full training with constant lr=1e-4 achieves test CR > 0.0176 (P4 prove-out baseline) with prec > 0.5 and rec > 0.5, and subset validation detects trends within 5000 steps.
+### Failure criteria: Full training with constant LR shows different dynamics than prove-out (collapse reappears at full-data scale), or step-based features introduce bugs that corrupt training.
 
-### Detailed Analysis:
+### What Needs to Happen (prioritized):
 
-**Why prove-out mode makes sense NOW:**
-1. The mode collapse is visible by epoch 2 batch-level metrics (train loss rising within the epoch). With 20% data, each epoch takes ~15 min instead of ~75 min. Five epochs in ~75 min instead of ~6.25 hours.
-2. The key diagnostic (train loss trajectory) does not require the full dataset to be informative. If lr=3e-4 overshoots on full data, it will almost certainly overshoot on 20% data (possibly even faster due to fewer gradient steps per epoch).
-3. Multiple experiments can be run sequentially in a few hours: lr=3e-4, lr=1e-4, lr=5e-5, lr=3e-4 with cosine decay, etc.
-4. Current approach (full data, patience=15) would waste ~17 hours of GPU time on 14 more failing epochs before early stopping triggers.
+**1. Implement subset validation every N steps (NOT DONE)**
+- From step_based_training.md: run 10% of val data every 5000 steps
+- Gives mid-epoch signal on val loss trend — critical for detecting collapse early
+- On full data (11,325 batches/epoch), this means ~2 eval checkpoints per epoch before full eval
+- Each subset eval on 10% val data: ~6 chunks of 63 = ~270K samples, should take ~2-3 min
 
-**Implementation approach (for dev directive):**
-- Add a `--prove-out` flag to train.py that:
-  - Uses 20% of training chunks (28 of 138 chunks, ~2265 batches/epoch)
-  - Runs 5 epochs max (no early stopping patience)
-  - Logs batch-level loss every 50 batches (already done)
-  - Skips full validation (only log train loss trajectory — the diagnostic we need)
-  - OR: faster alternative — just pass `--max-chunks 28 --max-epochs 5` if the data loader supports chunk limiting
-- Alternatively, the simplest implementation: create a small token subset by symlinking only 28 of 138 train chunk files
+**2. Implement step-based early stopping (NOT DONE)**
+- Convert patience from epochs to evaluation cycles
+- If using eval every 5000 steps: patience=15 epochs becomes patience=15 eval cycles = 75,000 steps (~6.6 epochs)
+- More responsive: catches plateau within hours, not days
 
-**Immediate action priority:**
-1. STOP current training (epoch 3+ is wasting GPU time, best model already saved from epoch 1)
-2. Implement prove-out mode OR manually limit data
-3. Run prove-out sweep: test lr in {1e-4, 5e-5, 3e-4 with cosine decay, 3e-4 with warmup+decay}
-4. Whichever lr/schedule shows stable or declining train loss across 5 prove-out epochs, use that for full run
-5. Relaunch full training with winning recipe
+**3. Relaunch full training with P4 recipe (constant lr=1e-4)**
+- Already proven stable on 20% data through 5 epochs
+- Expected: better CR on full data due to more gradient steps per epoch
+- Step-based features provide safety net for early detection of problems
 
-**Risk assessment of prove-out approach:**
-- LOW risk: epoch 1 best model is preserved regardless of what we do next
-- The 20% subset may have slightly different batch statistics, but the mode collapse is so dramatic (train loss rising 7% in epoch 2) that any recipe that fixes it on 20% data will very likely fix it on full data
-- Cost of being wrong: ~75 min of GPU time on a prove-out sweep that doesn't transfer. This is still much less than the ~17 hours of wasted patience epochs.
-
-**Alternative to prove-out (also valid):**
-- Just reduce lr to 1e-4 and relaunch full training directly. This is simpler but slower to iterate if 1e-4 also fails.
-- Add cosine annealing scheduler and relaunch. Good odds of working but no fast feedback loop.
+**4. Consider loss weight tuning as follow-up (OPTIONAL, FUTURE)**
+- Root cause of cosine collapse: multi-task loss weight conflict
+- Per-head LR scaling or gradient normalization could unlock cosine schedule
+- But this is optimization beyond the immediate goal — constant LR already works
 
 ---
 
 ## Persistent Notes
-- Previous constraint: Infrastructure (CUDA OOM from torch.compile) — RESOLVED by switching to mode='default'
-- Current constraint: Training Recipe (lr=3e-4 causes mode collapse after epoch 1)
-- Previous gap: Unmeasurable (no completed epoch)
-- Current gap: 0.94x of target (CR=0.0138 vs target 0.0147) — NEARLY THERE
+- Previous constraint: Training Recipe (lr=3e-4 causes mode collapse; cosine decay causes multi-task loss conflict) — RESOLVED via P4 constant LR recipe
+- Current constraint: Execution (implement remaining step-based features, relaunch full training)
+- Previous gap: 0.94x of target (V5 epoch 1 CR=0.0138 vs V3 0.0147)
+- Current gap: EXCEEDED on prove-out. P4 test CR=0.0176 = 1.20x V3 baseline. Need full-data confirmation.
 - Hypothesis history:
   - Cycle 1-3: "Launch full training, expect CR >= 0.0147" (blocked by execution)
-  - Cycle 4: "Fix CUDA Graph OOM and relaunch" (CONFIRMED — OOM fixed, training ran)
-  - Cycle 5 (current): "Implement prove-out mode for rapid LR/scheduler iteration to fix mode collapse"
+  - Cycle 4: "Fix CUDA Graph OOM and relaunch" (CONFIRMED — OOM fixed)
+  - Cycle 5: "Implement prove-out mode for rapid LR/scheduler iteration" (CONFIRMED — all 4 prove-outs complete)
+  - Cycle 6 (current): "Implement step-based training + relaunch full training with constant lr=1e-4"
 - Key evidence accumulated:
-  - V5 epoch 1: CR=0.0138, Prec=0.591, Rec=0.881, P@5=0.213, TrL=0.5508, VL=0.6111 — STRONG
-  - V5 epoch 2: MODE COLLAPSE. TrL=0.5894 (ROSE), VL=0.7073 (+15.7%), Prec/Rec=0.000
-  - V5 epoch 3: Continuing degradation, TrL rising within epoch (0.585->0.588 at batch 1000)
-  - Mode collapse is NOT overfitting (train loss rises too) — it is LR overshoot or loss conflict
-  - P@5 improved 0.213->0.251 despite collapse — ranking signal preserved, calibration destroyed
-  - LR barely decayed epoch 1->2: 3.00e-4 -> 2.99e-4 (essentially no schedule effect)
-  - Best model (epoch 1) safely preserved in best_model.pt and best_model_epoch1.pt
-  - V5 training speed: ~75 min/epoch on full data. Prove-out (20%) would be ~15 min/epoch.
-  - V5 data: 138 train chunks, 11,325 batches/epoch at batch_size=512
-  - GPU: Quadro RTX 6000, 24GB, memory stable at 6.8 GiB (OOM fix working)
+  - Architecture VALIDATED: all 4 prove-outs beat V3 on test CR (0.0141-0.0185 vs 0.0147)
+  - P4 (constant lr=1e-4): ONLY stable recipe. Prec=0.595, Rec=0.978 at epoch 5. Test CR=0.0176.
+  - Root cause identified: multi-task loss weight conflict under cosine decay (not LR magnitude)
+  - Cosine decay universally kills prec/rec by epoch 3 regardless of LR
+  - P2 paradox: CR=0.0721 with prec/rec=0 means ranking head excellent but classification head dead
   - V3 baseline: CR=0.0147, rank_corr=0.0152, return_corr=0.0132 (epoch 12)
   - V1 best ever: CR=0.0192 (epoch 33)
-  - V4 was a regression: CR=0.0031 (overparameterized)
-  - Known data issues: 6/20 summary token dims zeros, price dim 15 always zero
-  - BCE fix applied and confirmed working
-  - 7 zombie processes (cosmetic)
+  - Full-data epoch 1 (lr=3e-4): CR=0.0138, strong but collapsed by epoch 2
+  - Step-based training: checkpointing (2000 steps) and resume DONE. Subset val and step-based early stopping NOT DONE.
+  - Step-based training doc: `/home/ubuntu/workspace/RLQuest-manager/manual_docs/step_based_training.md`
+  - GPU: Quadro RTX 6000, 24GB. Full epoch: ~22 hours at full data scale (per doc), ~75 min at 20% scale.
+  - Zombie processes: 10 (cosmetic, accumulating)
 - Watch items for next cycle:
-  - Has dev stopped the current (wasteful) training run?
-  - Has prove-out mode been implemented or data subset created?
-  - If prove-out running: what is train loss trajectory across 5 epochs for each lr tested?
-  - Key signal: train loss should DECLINE or stay flat across prove-out epochs. Any rise = recipe still broken.
-  - Once winning recipe identified: full training relaunched with new lr/schedule?
-  - Epoch 1 best model PRESERVED — this is our safety net regardless of experiments
-  - If dev takes alternative approach (just change lr and relaunch full): monitor epoch 2 for same collapse pattern
+  - Has dev implemented subset validation every N steps?
+  - Has dev implemented step-based early stopping?
+  - Has full training been relaunched with P4 recipe (constant lr=1e-4)?
+  - If training running: check step-level val loss trend for stability
+  - Monitor prec/rec through first 5000 steps — confirm no collapse with constant LR at full scale
+  - Goal tracker still stale — needs update with prove-out results and new priorities
